@@ -1,0 +1,825 @@
+/**
+ * Content-facing types. Episodes are plain data built from these interfaces plus small behavior
+ * functions that talk to the running game through the APIs declared here (GameCtx, EnemyApi,
+ * RoomScriptApi, MechanicApi). Nothing in this file imports Phaser at runtime, so content modules
+ * stay testable in Node.
+ */
+import type Phaser from 'phaser';
+import type { Track } from './audio/music';
+import type { SfxRecipe } from './audio/sfx';
+import type { Rng } from './rng';
+import type { StatBlock, StatModifiers } from './effects/stats';
+
+// ---------------------------------------------------------------------------------------------
+// Identity and canon metadata
+// ---------------------------------------------------------------------------------------------
+
+/** 'S01E01' style id. Compare with compareEpisodes() in engine/episodes.ts. */
+export type EpisodeId = `S${string}E${string}`;
+export type ContentId = string;
+
+export interface ContentMeta {
+  id: ContentId;
+  /** The episode this first appears in (in the show, or first used by this game if invented). */
+  firstAppears: EpisodeId;
+  /** true = from the show; false = invented for this game. */
+  canon: boolean;
+}
+
+export interface Weighted<T extends string = string> {
+  id: T;
+  weight: number;
+}
+
+export interface Vec {
+  x: number;
+  y: number;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Art (drawn in code at boot; see engine/art)
+// ---------------------------------------------------------------------------------------------
+
+export type Graphics = Phaser.GameObjects.Graphics;
+
+/** A texture generated at boot by drawing into a Graphics object. */
+export interface SpriteArt {
+  key: string;
+  width: number;
+  height: number;
+  draw(g: Graphics, w: number, h: number): void;
+}
+
+/** Draws a 32x32 item/status icon (centered at 16,16). */
+export type IconDraw = (g: Graphics) => void;
+
+/** Draws a portrait into a square box. */
+export type PortraitDraw = (g: Graphics, size: number, expression: string) => void;
+
+/** Draws a cutscene backdrop into a panel. */
+export interface BackdropDef {
+  id: string;
+  draw(g: Graphics, w: number, h: number): void;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Characters, cutscenes, dialogue
+// ---------------------------------------------------------------------------------------------
+
+export interface CharacterDef extends ContentMeta {
+  name: string;
+  /** Accent color for speech bubbles and name tags. */
+  color: number;
+  portrait: PortraitDraw;
+  /** World sprite, when the character appears in rooms. */
+  sprite?: SpriteArt;
+  /** The same sprite with a different shirt color (cosmetic upgrades for playable characters). */
+  recolor?(shirt: number, key: string): SpriteArt;
+}
+
+export interface CutscenePanel {
+  backdrop: string;
+  speaker?: ContentId;
+  expression?: string;
+  /** Other characters drawn small in the panel. */
+  cast?: ContentId[];
+  text: string;
+  /** Narration box instead of a speech line. */
+  caption?: boolean;
+  sfx?: string;
+}
+
+export interface CutsceneDef extends ContentMeta {
+  title?: string;
+  /** 2 to 6 panels, shown one after another on a single comic page. */
+  panels: CutscenePanel[];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Stats, statuses, items
+// ---------------------------------------------------------------------------------------------
+
+export type StatusDuration =
+  | { kind: 'seconds'; value: number }
+  | { kind: 'rooms'; value: number }
+  | { kind: 'act' }
+  | { kind: 'manual' };
+
+export interface StatusFlags {
+  noDash?: boolean;
+  /** Movement direction drifts. */
+  wobblyMove?: boolean;
+  /** Aim drifts. */
+  wobblyAim?: boolean;
+  /** Inputs randomly drop and swap. */
+  scrambled?: boolean;
+}
+
+export interface StatusDef extends ContentMeta {
+  name: string;
+  description: string;
+  positive: boolean;
+  duration: StatusDuration;
+  stats?: StatModifiers;
+  flags?: StatusFlags;
+  /** Status applied when this one runs out on its own (e.g. Genius -> Side Effects). */
+  thenApply?: ContentId;
+  /** Also ends when the act ends, whatever its duration (act-flavored statuses). */
+  endsWithAct?: boolean;
+  icon: IconDraw;
+}
+
+export type ItemKind = 'passive' | 'active' | 'consumable' | 'weapon';
+export type Rarity = 'common' | 'rare' | 'story';
+
+export interface WeaponSpec {
+  /** Multiplies damage from stats. */
+  damageMult: number;
+  fireRateMult: number;
+  extraProjectiles: number;
+  /** Extra total spread in radians. */
+  spread: number;
+  color: number;
+}
+
+export interface ItemDef extends ContentMeta {
+  name: string;
+  /** One-line funny description shown on pickup. */
+  blurb: string;
+  kind: ItemKind;
+  rarity: Rarity;
+  /** Base shop price in Scrap. */
+  price: number;
+  stats?: StatModifiers;
+  hooks?: ItemHooks;
+  /** Active items: recharge is counted in cleared rooms. Return false to keep the charge. */
+  active?: { recharge: number; use(ctx: GameCtx): boolean | void };
+  consumable?: { use(ctx: GameCtx): boolean | void };
+  weapon?: WeaponSpec;
+  icon: IconDraw;
+  /** Can't drop until unlocked (garage upgrade or an episode clear). */
+  locked?: boolean;
+  /** Story gear handed out by scripts; never in random pools. */
+  noPool?: boolean;
+}
+
+export type HitSource = 'shot' | 'slash' | 'explosion' | 'shard' | 'poison' | 'rick' | 'hazard';
+
+export interface HitInfo {
+  source: HitSource;
+  damage: number;
+  /** Free-form tag, e.g. 'neutrino' for the bomb blast. */
+  tag?: string;
+  wasFrozen: boolean;
+  killed: boolean;
+  /** Shots only: the shot bounced off a wall before hitting. */
+  bounced?: boolean;
+}
+
+export interface ShotInfo {
+  angle: number;
+  x: number;
+  y: number;
+}
+
+export interface ItemHooks {
+  onFire?(ctx: GameCtx, shot: ShotInfo): void;
+  onHit?(ctx: GameCtx, enemy: EnemyRef, hit: HitInfo): void;
+  onKill?(ctx: GameCtx, enemy: EnemyRef, hit: HitInfo): void;
+  onDamageTaken?(ctx: GameCtx, halves: number, source: string): void;
+  onDash?(ctx: GameCtx): void;
+  /** The dashing player passed through an enemy (once per enemy per dash). */
+  onDashContact?(ctx: GameCtx, enemy: EnemyRef): void;
+  onRoomClear?(ctx: GameCtx): void;
+}
+
+export interface SynergyDef extends ContentMeta {
+  name: string;
+  blurb: string;
+  /** Active while the player holds every one of these items. */
+  requires: ContentId[];
+  stats?: StatModifiers;
+  hooks?: ItemHooks;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Runtime handles given to content code
+// ---------------------------------------------------------------------------------------------
+
+export interface PlayerRef {
+  readonly x: number;
+  readonly y: number;
+  /** Health in half hearts. */
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly aimAngle: number;
+  readonly moving: boolean;
+  readonly sneaking: boolean;
+  readonly isDashing: boolean;
+  readonly isInvulnerable: boolean;
+  readonly controlLocked: boolean;
+  heal(halves: number): void;
+  damage(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): void;
+  knockback(angle: number, force: number): void;
+  setPosition(x: number, y: number): void;
+  setControlLocked(locked: boolean): void;
+}
+
+export interface EnemyRef {
+  readonly uid: number;
+  readonly def: EnemyDef;
+  readonly x: number;
+  readonly y: number;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly alive: boolean;
+  readonly frozen: boolean;
+  readonly elite: boolean;
+  readonly passive: boolean;
+}
+
+export interface ToastOptions {
+  color?: number;
+  seconds?: number;
+  /** Big centered banner instead of a small toast. */
+  banner?: boolean;
+  sub?: string;
+}
+
+export interface ExplosionSpec {
+  x: number;
+  y: number;
+  radius: number;
+  damage: number;
+  /** Half hearts dealt to the player if inside the radius (0 = harmless to the player). */
+  playerDamage?: number;
+  tag?: string;
+  color?: number;
+}
+
+export interface PlayerShotSpec {
+  x: number;
+  y: number;
+  angle: number;
+  damage: number;
+  speed?: number;
+  radius?: number;
+  color?: number;
+  source?: HitSource;
+  tag?: string;
+  /** Lifetime in seconds. */
+  life?: number;
+}
+
+/** The game as seen by items, statuses, gadgets, mechanics and scripts. */
+export interface GameCtx {
+  readonly rng: Rng;
+  readonly player: PlayerRef;
+  readonly episodeId: EpisodeId;
+  readonly actId: string;
+  /** Seconds since the run started (pauses excluded). */
+  now(): number;
+  stats(): StatBlock;
+  hasItem(id: ContentId): boolean;
+  giveItem(id: ContentId, opts?: { silent?: boolean }): void;
+  applyStatus(id: ContentId): void;
+  removeStatus(id: ContentId): void;
+  hasStatus(id: ContentId): boolean;
+  enemies(): EnemyRef[];
+  damageEnemy(enemy: EnemyRef, amount: number, source: HitSource, tag?: string): void;
+  freeze(enemy: EnemyRef, seconds: number): void;
+  stun(enemy: EnemyRef, seconds: number): void;
+  poison(enemy: EnemyRef, dps: number, seconds: number): void;
+  /** Speed multiplier for a while: below 1 slows, above 1 hastes. */
+  slow(enemy: EnemyRef, mult: number, seconds: number): void;
+  explode(spec: ExplosionSpec): void;
+  playerShot(spec: PlayerShotSpec): void;
+  /** Run something later (in run time; paused with the game). */
+  after(seconds: number, fn: () => void): void;
+  scrap(): number;
+  addScrap(amount: number, x?: number, y?: number): void;
+  spendScrap(amount: number): boolean;
+  /** Run-scoped flags shared by scripts and mechanics. */
+  readonly flags: Record<string, unknown>;
+  toast(text: string, opts?: ToastOptions): void;
+  /** Speech bubble from a character (placed near the player if the character isn't on screen). */
+  say(speaker: ContentId, text: string, seconds?: number): void;
+  sfx(id: string): void;
+  shake(intensity: number, ms: number): void;
+  flash(color: number, ms: number): void;
+  /** Shows a temporary pulsing sprite (e.g. a lit bomb) for a few seconds. */
+  marker(art: string, x: number, y: number, seconds: number): void;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Enemies and bosses
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Enemy behavior is a generator ("brain") advanced once per frame. Yield a number to wait that
+ * many seconds, a predicate to wait until it's true, or nothing to wait one frame.
+ */
+export type BrainYield = number | undefined | void | (() => boolean);
+export type Brain = Generator<BrainYield, void, undefined>;
+
+export type TelegraphSpec =
+  | { kind: 'circle'; x: number; y: number; radius: number }
+  | { kind: 'arc'; x: number; y: number; radius: number; angle: number; spread: number }
+  | { kind: 'line'; x: number; y: number; angle: number; length: number; width: number }
+  | { kind: 'ring'; x: number; y: number; radius: number; thickness: number };
+
+/** Built-in enemy shot looks. Content can add a kind by registering a sprite keyed `shot-<kind>`. */
+export type ShotKind = 'orb' | 'paper' | 'ball' | 'book' | 'spore' | 'bolt' | 'stamp' | 'ice' | (string & {});
+
+export interface EnemyShotSpec {
+  x?: number;
+  y?: number;
+  angle: number;
+  speed: number;
+  count?: number;
+  /** Total spread in radians across `count` shots. */
+  spread?: number;
+  damage?: number;
+  radius?: number;
+  bounces?: number;
+  kind?: ShotKind;
+  color?: number;
+  life?: number;
+  /** Status applied to the player on hit (e.g. 'stamped'). */
+  applies?: ContentId;
+}
+
+export type MeleeSpec =
+  | { shape: 'arc'; x: number; y: number; radius: number; angle: number; spread: number; damage: number; knockback?: number }
+  | { shape: 'circle'; x: number; y: number; radius: number; damage: number; knockback?: number };
+
+export type HazardSpec =
+  | { kind: 'shockwave'; x: number; y: number; speed: number; maxRadius: number; thickness: number; damage: number; label?: string }
+  | { kind: 'laser'; x1: number; y1: number; x2: number; y2: number; width: number; warn: number; active: number; damage: number };
+
+export interface EnemySelf extends EnemyRef {
+  readonly vx: number;
+  readonly vy: number;
+  /** Body radius in pixels (elites are bigger). */
+  readonly radius: number;
+  /** Size multiplier (1 for normal enemies). */
+  readonly sizeScale: number;
+  /** Blocked by a wall on the last physics step. */
+  readonly blocked: boolean;
+  setVelocity(vx: number, vy: number): void;
+  setInvulnerable(on: boolean): void;
+  /** 0..1 squash/lean used while winding up (purely visual). */
+  setWindupPose(amount: number): void;
+  setFacing(angle: number): void;
+  setAlpha(alpha: number): void;
+  setNameplate(text: string | null): void;
+  teleport(x: number, y: number): void;
+  /** Dies normally (drops, death effects, hooks). */
+  kill(): void;
+  /** Leaves the room quietly: no drops, no death effects (e.g. a thief escaping). */
+  despawn(): void;
+  /** Per-enemy scratch state for brains. */
+  readonly memory: Record<string, unknown>;
+}
+
+export interface EnemyApi {
+  readonly self: EnemySelf;
+  readonly player: PlayerRef;
+  readonly rng: Rng;
+  readonly ctx: GameCtx;
+  dt(): number;
+  /** Elite override for a named parameter, or the fallback. */
+  param(name: string, fallback: number): number;
+  /** Move along the room's flow field toward the player for this frame. */
+  chase(speedMult?: number): void;
+  moveToward(x: number, y: number, speedMult?: number): void;
+  moveAngle(angle: number, speedMult?: number): void;
+  /** Stay between min and max distance from the player, strafing. */
+  keepDistance(min: number, max: number, speedMult?: number): void;
+  stop(): void;
+  distToPlayer(): number;
+  angleToPlayer(): number;
+  canSeePlayer(): boolean;
+  /**
+   * Shows a telegraph for `seconds` (scaled by the player's enemy wind-up multiplier, never under
+   * 0.4 s) while the enemy leans into the attack. Use with yield*.
+   */
+  windup(seconds: number, spec?: TelegraphSpec | TelegraphSpec[] | (() => TelegraphSpec)): Brain;
+  shoot(spec: EnemyShotSpec): void;
+  /** Instant melee check against the player. Returns true on a hit. */
+  melee(spec: MeleeSpec): boolean;
+  hazard(spec: HazardSpec): void;
+  spawn(enemyId: ContentId, x: number, y: number, opts?: { elite?: boolean }): EnemyRef | null;
+  say(text: string, seconds?: number): void;
+  sfx(id: string): void;
+  shake(intensity: number, ms: number): void;
+  room(): RoomInfo;
+}
+
+export interface EnemyDef extends ContentMeta {
+  name: string;
+  hp: number;
+  /** Pixels per second. */
+  speed: number;
+  /** Physics body radius in pixels. */
+  radius: number;
+  /** Half hearts dealt on touch (0 = harmless to touch). */
+  contactDamage: number;
+  art: SpriteArt;
+  brain(api: EnemyApi): Brain;
+  /** Chance to drop Scrap on death (elites always drop). */
+  scrapChance?: number;
+  flying?: boolean;
+  /** Front-facing shield: shots within this arc (degrees) of the facing direction are blocked. */
+  shieldArc?: number;
+  knockbackResist?: number;
+  elite?: { hpMult: number; scale?: number; params?: Record<string, number> };
+  onDeath?(api: EnemyApi): void;
+  /** Particle style when it dies ('death', 'paper', 'slime', 'spark', ...). */
+  deathFx?: string;
+  /** Nameplate text shown above the enemy (e.g. Rick insisting they're robots). */
+  nameplate?(ctx: GameCtx): string | null;
+  boss?: BossInfo;
+}
+
+export interface BossInfo {
+  title: string;
+  /** Plays when the boss is beaten, before the exit opens. */
+  defeatCutscene?: ContentId;
+  /** Item pedestal spawned when the boss is beaten. */
+  reward?: ContentId;
+  /** Hook run when the boss is beaten (e.g. leave a frozen statue behind). */
+  onDefeat?(api: RoomScriptApi, at: Vec): void;
+  music?: string;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rooms, scripts, encounters, special rooms
+// ---------------------------------------------------------------------------------------------
+
+export type TileKind = 'floor' | 'wall' | 'block' | 'cliff' | 'slow' | 'void';
+
+export type RoomKind = 'start' | 'combat' | 'calm' | 'treasure' | 'shop' | 'special' | 'finale';
+
+export interface RoomInfo {
+  readonly id: number;
+  readonly kind: RoomKind;
+  readonly templateId: string;
+  readonly specialId?: string;
+  readonly cleared: boolean;
+  readonly firstVisit: boolean;
+  /** Position within an act's calm prefix (0-based), if any. */
+  readonly prefixIndex?: number;
+  readonly isLastPrefix: boolean;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  tileAt(x: number, y: number): TileKind;
+  tileCenter(tx: number, ty: number): Vec;
+  /** World positions of a marker character in the room's template. */
+  markers(ch: string): Vec[];
+  randomFloorPoint(rng: Rng, minDistFromPlayer?: number): Vec;
+  /** Persistent per-room state for scripts and mechanics. */
+  readonly data: Record<string, unknown>;
+}
+
+export interface ChoicePrompt {
+  title?: string;
+  question: string;
+  options: string[];
+  /** Index of the right answer, if there is one. */
+  correct?: number;
+  /** Faintly highlight the right answer. */
+  glowCorrect?: boolean;
+  /** Seconds before it times out (answer = null). */
+  timeLimit?: number;
+  speaker?: ContentId;
+  onAnswer(index: number | null): void;
+}
+
+export interface PropSpec {
+  art: string;
+  x: number;
+  y: number;
+  solid?: boolean;
+  /** Radius of the solid body (defaults from the art size). */
+  radius?: number;
+  depth?: number;
+  interact?: { label: string; fn(): void };
+  /** Speech from this character (ctx.say) pops up over this prop. */
+  actor?: ContentId;
+  /** Decorative props that should still be there when the player comes back (no interaction). */
+  persist?: boolean;
+}
+
+export interface PropHandle {
+  readonly x: number;
+  readonly y: number;
+  setArt(art: string): void;
+  setInteract(interact: PropSpec['interact'] | null): void;
+  setVisible(visible: boolean): void;
+  /** Visual shake/pulse to draw attention. */
+  pulse(): void;
+  destroy(): void;
+}
+
+export interface PedestalOptions {
+  /** Shop price; omit for free pedestals. */
+  price?: number;
+  /** Taking one pedestal in a group removes the others. */
+  choiceGroup?: string;
+}
+
+export interface RoomScriptApi extends GameCtx {
+  readonly room: RoomInfo;
+  spawnEnemy(id: ContentId, x: number, y: number, opts?: { elite?: boolean; passive?: boolean; delay?: number }): EnemySelf | null;
+  /** Makes the current room a combat room until its enemies are dead (doors lock). */
+  makeCombat(): void;
+  /** Kills every enemy in the room (no drops). */
+  clearEnemies(): void;
+  /** Random enemy id from the act's pool. */
+  randomEnemy(): ContentId;
+  spawnPickup(id: ContentId, x: number, y: number): void;
+  spawnPedestal(itemId: ContentId, x: number, y: number, opts?: PedestalOptions): void;
+  /** Random item id from the act's pool that the player doesn't own yet. */
+  randomItem(filter?: { rarity?: Rarity; kind?: ItemKind }): ContentId | null;
+  addProp(spec: PropSpec): PropHandle;
+  enemyCount(): number;
+  setHostile(enemy: EnemyRef): void;
+  lockDoors(): void;
+  unlockDoors(): void;
+  /** Marks this room cleared (fires room-clear hooks) and opens its doors. */
+  completeRoom(): void;
+  /** For finale stages: marks the stage done and opens the way on. */
+  completeStage(): void;
+  /** Ends the act right away (plays its outro), e.g. after the prologue's last beat. */
+  endAct(): void;
+  showChoice(prompt: ChoicePrompt): void;
+  hideChoice(): void;
+  playCutscene(id: ContentId, onDone?: () => void): void;
+  setObjective(text: string | null): void;
+  /** HUD countdown; null hides it. */
+  setTimer(seconds: number | null, label?: string): void;
+  timerLeft(): number;
+  /** Floating hint text near the bottom of the screen; null hides it. */
+  hint(text: string | null): void;
+}
+
+/** Script attached to a special room, encounter or fixed room. */
+export interface RoomScript {
+  onEnter?(firstTime: boolean): void;
+  update?(dt: number): void;
+  onExit?(): void;
+  /** Called when all enemies in the room are dead. Return true to take over room clearing. */
+  onEnemiesCleared?(): boolean;
+  /** The room's boss was beaten (boss finales). Return true to take over the defeat sequence. */
+  onBossDefeated?(): boolean;
+}
+
+export interface EncounterDef extends ContentMeta {
+  name: string;
+  template: ContentId;
+  music?: string;
+  script(api: RoomScriptApi): RoomScript;
+}
+
+export interface SpecialRoomDef extends ContentMeta {
+  name: string;
+  templates: ContentId[];
+  /** Minimap icon letter. */
+  icon: string;
+  script?(api: RoomScriptApi): RoomScript;
+}
+
+export interface ShopDef {
+  keeperArt: string;
+  name: string;
+  /** Price multiplier on top of the player's shop price stat (Duty-Free is overpriced). */
+  priceMult?: number;
+  /** Consumables this shop always stocks. */
+  alwaysStocks?: ContentId[];
+}
+
+export interface PickupDef extends ContentMeta {
+  name: string;
+  art: string;
+  /** Pulled toward the player by magnet stats. */
+  magnetic?: boolean;
+  /** Return false to leave the pickup on the floor (e.g. health at full HP). */
+  collect(ctx: GameCtx): boolean | void;
+}
+
+export interface RoomTemplate {
+  id: ContentId;
+  /** Interior rows (walls and doors are added around them). See engine/dungeon/templates.ts. */
+  rows: string[];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Mechanics, gadgets, acts, episodes
+// ---------------------------------------------------------------------------------------------
+
+export interface HudWidget {
+  label: string;
+  /** 0..1 fill. */
+  value: number;
+  color: number;
+  text?: string;
+  /** Draws attention (blinks) when true. */
+  alert?: boolean;
+}
+
+export type PlayerEvent =
+  | { type: 'fire'; angle: number }
+  | { type: 'dash' }
+  | { type: 'fall'; x: number; y: number }
+  | { type: 'hurt'; halves: number; source: string };
+
+export interface MechanicApi extends GameCtx {
+  room(): RoomInfo;
+  /** Script-level API for the room the player is in right now. */
+  here(): RoomScriptApi;
+  /** Tile under the player's feet. */
+  playerTile(): TileKind;
+  hint(text: string | null): void;
+  playCutscene(id: ContentId, onDone?: () => void): void;
+  /** Turns unvisited rooms of one kind into another kind (e.g. calm -> combat) for the rest of the act. */
+  convertRooms(from: RoomKind, to: RoomKind): void;
+  setWeapon(itemId: ContentId): void;
+}
+
+export interface MechanicInstance {
+  onActStart?(): void;
+  onRoomEnter?(room: RoomInfo): void;
+  update?(dt: number): void;
+  onRoomClear?(room: RoomInfo): void;
+  onActEnd?(): void;
+  /** The mechanic key (F) was pressed. */
+  onAction?(): void;
+  onPlayerEvent?(event: PlayerEvent): void;
+  /** Whether the player may stand on this tile kind right now (undefined = no opinion). */
+  allowsTile?(tile: TileKind): boolean | undefined;
+  /** The player fell off a cliff/pit. Return true if the mechanic handled the consequences. */
+  onFall?(): boolean;
+  hud?(): HudWidget | null;
+}
+
+export interface MechanicDef extends ContentMeta {
+  name: string;
+  /** Short help text for the pause screen. */
+  help: string;
+  create(api: MechanicApi): MechanicInstance;
+}
+
+export interface GadgetDef extends ContentMeta {
+  name: string;
+  /** Called when Rick arrives. */
+  activate(ctx: GameCtx): void;
+  /** Rude things Rick says while using it. */
+  lines: string[];
+}
+
+export interface BiomeDef {
+  id: string;
+  name: string;
+  palette: {
+    background: number;
+    floor: number;
+    floorAlt: number;
+    wall: number;
+    wallTop: number;
+    block: number;
+    blockTop: number;
+    cliff: number;
+    cliffShadow: number;
+    slow: number;
+    accent: number;
+    door: number;
+  };
+  /** Pattern drawn on floor tiles. */
+  floorPattern: 'checker' | 'speckle' | 'grid' | 'planks' | 'blobs';
+  music: string;
+}
+
+export type FinaleStage =
+  | { kind: 'boss'; boss: ContentId; template: ContentId }
+  | { kind: 'encounter'; encounter: ContentId };
+
+export interface ProceduralLayout {
+  kind: 'procedural';
+  roomCount: [min: number, max: number];
+  /** Combat room templates. */
+  templates: ContentId[];
+  startTemplate: ContentId;
+  treasureTemplate: ContentId;
+  shopTemplate: ContentId;
+  /** A chain of calm rooms leading out of the start room before the floor branches. */
+  calmPrefix?: { count: [min: number, max: number]; templates: ContentId[]; lastTemplate: ContentId };
+}
+
+export interface FixedRoomDef {
+  x: number;
+  y: number;
+  kind: RoomKind;
+  template: ContentId;
+  script?: ContentId;
+}
+
+export interface FixedLayout {
+  kind: 'fixed';
+  rooms: FixedRoomDef[];
+  start: { x: number; y: number };
+}
+
+export interface ActDef {
+  id: string;
+  name: string;
+  subtitle?: string;
+  playable: ContentId;
+  biome: BiomeDef;
+  layout: ProceduralLayout | FixedLayout;
+  enemyPool: Weighted[];
+  itemPool: Weighted[];
+  eliteChance: number;
+  shop?: ShopDef;
+  specialRoom?: ContentId;
+  finale: FinaleStage[];
+  rick: { gadget: ContentId; entrance: 'walk' | 'portal' };
+  mechanics: ContentId[];
+  /** Statuses applied when the act starts. */
+  startStatuses?: ContentId[];
+  intro?: ContentId[];
+  outro?: ContentId[];
+  /** Art for the way out once the finale is done (defaults to a portal). */
+  exitArt?: string;
+  exitLabel?: string;
+  music?: string;
+}
+
+export interface EpisodeContent {
+  characters: CharacterDef[];
+  items: ItemDef[];
+  synergies: SynergyDef[];
+  statuses: StatusDef[];
+  enemies: EnemyDef[];
+  encounters: EncounterDef[];
+  specialRooms: SpecialRoomDef[];
+  mechanics: MechanicDef[];
+  gadgets: GadgetDef[];
+  pickups: PickupDef[];
+  cutscenes: CutsceneDef[];
+  backdrops: BackdropDef[];
+  templates: RoomTemplate[];
+  scripts: RoomScriptDef[];
+  sprites: SpriteArt[];
+  /** Pools of short lines by situation, e.g. 'death' for the game-over screen. */
+  barks?: Record<string, string[]>;
+  /** Music tracks this content adds, by id (format in engine/audio/music.ts). */
+  music?: Record<string, Track>;
+  /** Sound effects this content adds, by id (format in engine/audio/sfx.ts). */
+  sfx?: Record<string, SfxRecipe>;
+}
+
+/** A named script for fixed-layout rooms. */
+export interface RoomScriptDef {
+  id: ContentId;
+  script(api: RoomScriptApi): RoomScript;
+}
+
+export interface EpisodeDef extends ContentMeta {
+  id: EpisodeId;
+  season: number;
+  number: number;
+  title: string;
+  /** One-line pitch shown on the Season Map. */
+  synopsis: string;
+  /** Weapon the playable character starts every run with. */
+  startWeapon: ContentId;
+  prologue?: ActDef;
+  acts: ActDef[];
+  epilogue?: ActDef;
+  /** Content added to the global pool after the first clear. */
+  unlocksOnClear: ContentId[];
+  content: EpisodeContent;
+}
+
+/** Season Map entry. Episodes without a def are shown locked as "coming soon". */
+export interface EpisodeListing {
+  id: EpisodeId;
+  season: number;
+  number: number;
+  title: string;
+  def?: EpisodeDef;
+}
+
+export interface UpgradeDef {
+  id: ContentId;
+  name: string;
+  description: string;
+  category: 'stat' | 'start' | 'unlock' | 'cosmetic';
+  /** Cost per level; the array length is the max level. */
+  costs: number[];
+  stats?: StatModifiers;
+  startItem?: ContentId;
+  unlocks?: ContentId;
+  shirt?: number;
+}

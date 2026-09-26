@@ -1,0 +1,1928 @@
+/**
+ * One run through one episode. Builds each act's floor, runs rooms (combat, shops, scripts,
+ * finales), and implements the APIs content code uses (GameCtx, RoomScriptApi, MechanicApi).
+ * The engine never special-cases an episode: everything episode-specific comes in as content.
+ */
+import Phaser from 'phaser';
+import { BASE_STATS, ECONOMY, ENEMIES, PLAYER, RICK_METER, STAT_LIMITS } from '../content/balance';
+import { GAME_HEIGHT, GAME_WIDTH, HUD_HEIGHT, TILE } from '../engine/constants';
+import { buildFixedFloor, generateFloor, type FloorConfig, type FloorRoom } from '../engine/dungeon/generate';
+import { DIR_VEC, doorCell, OPPOSITE, type Dir, type ParsedTemplate } from '../engine/dungeon/templates';
+import { activeSynergies, hookSources, itemModifiers, runHook, type HookSource } from '../engine/effects/hooks';
+import { computeStats, type StatBlock, type StatModifiers } from '../engine/effects/stats';
+import type { StatusChange } from '../engine/effects/status';
+import { nextUp } from '../engine/episodes';
+import { enemyPoolFor, itemPoolFor, type ItemFilter } from '../engine/pools';
+import type { Registry } from '../engine/registry';
+import type { Rng } from '../engine/rng';
+import { freshRoomState, RunState, type PedestalState, type RoomState } from '../engine/run/RunState';
+import { Enemy, type EnemyHost } from '../engine/runtime/Enemy';
+import { Fx, type BurstStyle } from '../engine/runtime/Fx';
+import { Player, type PlayerHost, type PlayerInput } from '../engine/runtime/Player';
+import { ProjectilePool } from '../engine/runtime/Projectiles';
+import { RoomView, type DoorSpec } from '../engine/runtime/RoomView';
+import { HazardLayer, TelegraphLayer } from '../engine/runtime/Telegraphs';
+import { WorldObjects, type Interactable, type PedestalObj, type PickupObj, type PropObj, type Ware } from '../engine/runtime/WorldObjects';
+import type { Settings } from '../engine/save/save';
+import { persist, svc } from '../engine/services';
+import type {
+  ActDef,
+  ContentId,
+  EnemyRef,
+  EnemySelf,
+  EnemyShotSpec,
+  EpisodeId,
+  ExplosionSpec,
+  GameCtx,
+  HitInfo,
+  HitSource,
+  MechanicApi,
+  MechanicDef,
+  MechanicInstance,
+  PlayerShotSpec,
+  PropSpec,
+  RoomInfo,
+  RoomKind,
+  RoomScript,
+  RoomScriptApi,
+  StatusFlags,
+  TileKind,
+  Vec,
+} from '../engine/types';
+import type { HudApi, HudModel } from '../engine/ui/hudModel';
+import { installDebug } from '../debug/debug';
+
+export interface RunSceneData {
+  episodeId: EpisodeId;
+  seed: string;
+  /** Debug: start at this index of the act sequence. */
+  startAct?: number;
+  /** Play the prologue even after the episode has been cleared. */
+  playPrologue?: boolean;
+}
+
+export interface RunSummary {
+  victory: boolean;
+  episodeId: EpisodeId;
+  episodeTitle: string;
+  seed: string;
+  seconds: number;
+  kills: number;
+  rooms: number;
+  items: string[];
+  scrapBanked: number;
+  cause: string;
+  newUnlocks: string[];
+  /** What the Season Map now calls "next up" (null when nothing is left). */
+  nextEpisode: { title: string; playable: boolean } | null;
+  quit: boolean;
+}
+
+const MAX_ENEMIES = 45;
+const SPIN: Record<string, number> = { paper: 540, book: 420, stamp: 360, ball: 600, spore: 200 };
+
+export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
+  reg!: Registry;
+  run!: RunState;
+  player!: Player;
+  ctx!: GameCtx;
+  telegraphs!: TelegraphLayer;
+  hazards!: HazardLayer;
+  fx!: Fx;
+  objects!: WorldObjects;
+  enemies: Enemy[] = [];
+  godModeOn = false;
+
+  private initData!: RunSceneData;
+  private hud!: HudApi;
+  private enemyGroup!: Phaser.Physics.Arcade.Group;
+  private playerShots!: ProjectilePool;
+  private enemyShots!: ProjectilePool;
+  private roomView: RoomView | null = null;
+  private roomInfoObj: RoomInfo | null = null;
+  private roomState!: RoomState;
+  private scriptApi: RoomScriptApi | null = null;
+  private script: RoomScript | null = null;
+  private colliders: Phaser.Physics.Arcade.Collider[] = [];
+  private mechanics: { def: MechanicDef; inst: MechanicInstance }[] = [];
+  private keys!: Record<string, Phaser.Input.Keyboard.Key>;
+  private frameDelta = 0;
+  private statsCache: StatBlock | null = null;
+  private sourcesCache: HookSource[] | null = null;
+  private upgradeMods: StatModifiers[] = [];
+  private maxHpValue = 6;
+  private timers: { at: number; fn: () => void; room: boolean }[] = [];
+  private transitioning = false;
+  private scriptLock = false;
+  private doorsOpen = true;
+  private bossEnemy: Enemy | null = null;
+  private exitProp: PropObj | null = null;
+  private objectiveText: string | null = null;
+  private hudTimer: { left: number; label: string } | null = null;
+  private hintText: string | null = null;
+  private readonly actors = new Map<string, () => Vec | null>();
+  private lastSafe: Vec = { x: 0, y: 0 };
+  private rickBusy = false;
+  private ended = false;
+  private finishingAct = false;
+  private dead = false;
+  private meterAnnounced = false;
+  private interactable: Interactable | null = null;
+  private readonly playerAnchor = () => ({ x: this.player.x, y: this.player.y - 48 });
+  private readonly screenAnchor = () => {
+    const v = this.cameras.main.worldView;
+    return { x: v.centerX, y: v.y + 185 };
+  };
+
+  constructor() {
+    super('Run');
+  }
+
+  init(data: RunSceneData): void {
+    this.initData = data;
+    // Scenes are reused between runs, so reset every piece of per-run state here.
+    this.enemies = [];
+    this.godModeOn = false;
+    this.roomView = null;
+    this.roomInfoObj = null;
+    this.scriptApi = null;
+    this.script = null;
+    this.colliders = [];
+    this.mechanics = [];
+    this.statsCache = null;
+    this.sourcesCache = null;
+    this.upgradeMods = [];
+    this.timers = [];
+    this.transitioning = false;
+    this.scriptLock = false;
+    this.doorsOpen = true;
+    this.bossEnemy = null;
+    this.exitProp = null;
+    this.objectiveText = null;
+    this.hudTimer = null;
+    this.hintText = null;
+    this.actors.clear();
+    this.rickBusy = false;
+    this.ended = false;
+    this.finishingAct = false;
+    this.dead = false;
+    this.meterAnnounced = false;
+    this.interactable = null;
+  }
+
+  create(): void {
+    const s = svc();
+    this.reg = s.registry;
+    const data = this.initData;
+    const ep = this.reg.episodes.get(data.episodeId);
+    if (!ep) throw new Error(`Episode ${data.episodeId} isn't playable`);
+    const save = s.save;
+    const cleared = (save.episodes[ep.id]?.clears ?? 0) > 0;
+
+    const startItems: ContentId[] = [];
+    for (const [id, level] of Object.entries(save.upgrades)) {
+      const u = this.reg.upgrades.get(id);
+      if (!u) continue;
+      if (u.stats) for (let i = 0; i < Math.min(level, u.costs.length); i++) this.upgradeMods.push(u.stats);
+      if (u.startItem) startItems.push(u.startItem);
+    }
+    const base = computeStats(BASE_STATS, this.upgradeMods, STAT_LIMITS);
+    this.maxHpValue = Math.max(2, Math.round(base.maxHearts) * 2);
+    this.run = new RunState(this.reg, ep, data.seed, {
+      skipPrologue: cleared && !data.playPrologue,
+      weapon: ep.startWeapon,
+      startHp: this.maxHpValue,
+    });
+    const rec = (save.episodes[ep.id] ??= { attempts: 0, clears: 0, bestTimeMs: null });
+    rec.attempts++;
+    persist();
+
+    this.cameras.main.setViewport(0, HUD_HEIGHT, GAME_WIDTH, GAME_HEIGHT - HUD_HEIGHT);
+    this.enemyGroup = this.physics.add.group();
+    this.playerShots = new ProjectilePool(this, 4000, 260);
+    this.enemyShots = new ProjectilePool(this, 4200, 420);
+    this.telegraphs = new TelegraphLayer(this);
+    this.hazards = new HazardLayer(this, (id) => this.sfx(id));
+    this.fx = new Fx(this, () => this.settings());
+    this.objects = new WorldObjects(this);
+    this.player = new Player(this, this, this.playerTexture(), 0, 0);
+    this.ctx = this.buildCtx();
+    this.setupInput();
+
+    this.scene.launch('Hud', { run: this });
+    this.hud = this.scene.get('Hud') as unknown as HudApi;
+    for (const id of startItems) this.giveItem(id, true);
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
+    if (s.debug) installDebug(this);
+    this.time.delayedCall(20, () => this.startAct(Math.min(data.startAct ?? 0, this.run.sequence.length - 1)));
+  }
+
+  private cleanup(): void {
+    // Phaser tears down this scene's objects itself; this just releases what it doesn't know about.
+    this.teardownRoom();
+    this.playerShots?.destroy();
+    this.enemyShots?.destroy();
+    this.telegraphs?.destroy();
+    this.hazards?.destroy();
+    this.fx?.destroy();
+    this.objects?.clear();
+    this.player?.destroy();
+  }
+
+  // ---- host plumbing ---------------------------------------------------------------------------
+
+  get rng(): Rng {
+    return this.run.play;
+  }
+
+  settings(): Settings {
+    return svc().save.settings;
+  }
+
+  frameDt(): number {
+    return this.frameDelta;
+  }
+
+  now(): number {
+    return this.run.time;
+  }
+
+  godMode(): boolean {
+    return this.godModeOn;
+  }
+
+  room(): RoomView {
+    return this.roomView!;
+  }
+
+  roomInfo(): RoomInfo {
+    return this.roomInfoObj!;
+  }
+
+  windupMult(): number {
+    return this.stats().enemyWindupMult;
+  }
+
+  hp(): number {
+    return this.run.hp;
+  }
+
+  maxHp(): number {
+    this.stats();
+    return this.maxHpValue;
+  }
+
+  flags(): StatusFlags {
+    return this.run.statuses.flags();
+  }
+
+  tileUnderPlayer(): TileKind {
+    return this.roomView ? this.roomView.tileAt(this.player.x, this.player.y) : 'floor';
+  }
+
+  sfx(id: string): void {
+    svc().audio.play(id);
+  }
+
+  shake(intensity: number, ms: number): void {
+    this.fx.shake(intensity, ms);
+  }
+
+  stats(): StatBlock {
+    if (!this.statsCache) {
+      const inv = this.run.inventory;
+      const s = computeStats(
+        BASE_STATS,
+        [...itemModifiers(inv, this.reg.items, this.reg.synergies), ...this.run.statuses.modifiers(), ...this.upgradeMods],
+        STAT_LIMITS,
+      );
+      this.statsCache = s;
+      const max = Math.max(2, Math.round(s.maxHearts) * 2);
+      if (max > this.maxHpValue) this.run.hp += max - this.maxHpValue;
+      this.maxHpValue = max;
+      this.run.hp = Math.min(this.run.hp, max);
+    }
+    return this.statsCache;
+  }
+
+  private sources(): HookSource[] {
+    if (!this.sourcesCache) this.sourcesCache = hookSources(this.run.inventory, this.reg.items, this.reg.synergies);
+    return this.sourcesCache;
+  }
+
+  private invalidateStats(): void {
+    this.statsCache = null;
+    this.sourcesCache = null;
+    this.stats();
+  }
+
+  private playerTexture(): string {
+    const ch = this.reg.characters.get(this.run.act.playable);
+    const key = ch?.sprite?.key ?? 'morty';
+    const shirt = svc().save.shirt;
+    if (shirt && this.textures.exists(`${key}-${shirt}`)) return `${key}-${shirt}`;
+    return key;
+  }
+
+  private buildCtx(): GameCtx {
+    const run = this.run;
+    return {
+      rng: run.play,
+      player: this.player,
+      episodeId: run.episode.id,
+      get actId() {
+        return run.act.id;
+      },
+      now: () => run.time,
+      stats: () => this.stats(),
+      hasItem: (id) => run.inventory.has(id),
+      giveItem: (id, o) => this.giveItem(id, o?.silent),
+      applyStatus: (id) => this.applyStatus(id),
+      removeStatus: (id) => {
+        if (run.statuses.remove(id)) this.invalidateStats();
+      },
+      hasStatus: (id) => run.statuses.has(id),
+      enemies: () => this.enemies.filter((e) => e.alive && !e.passive),
+      damageEnemy: (e, amount, source, tag) => this.hitEnemy(e as Enemy, amount, { source, tag }),
+      freeze: (e, s) => {
+        if ((e as Enemy).alive) (e as Enemy).freeze(s);
+      },
+      stun: (e, s) => {
+        if ((e as Enemy).alive) (e as Enemy).stun(s);
+      },
+      poison: (e, dps, s) => {
+        if ((e as Enemy).alive) (e as Enemy).poison(dps, s);
+      },
+      slow: (e, m, s) => {
+        if ((e as Enemy).alive) (e as Enemy).slow(m, s);
+      },
+      explode: (spec) => this.explode(spec),
+      playerShot: (spec) => this.spawnPlayerShot(spec),
+      after: (s, fn) => this.after(s, fn, false),
+      scrap: () => run.scrap,
+      addScrap: (n, x, y) => this.addScrap(n, x, y),
+      spendScrap: (n) => {
+        if (run.scrap < n) return false;
+        run.scrap -= n;
+        return true;
+      },
+      flags: run.flags,
+      toast: (t, o) => this.hud.toast(t, o),
+      say: (who, text, s) => this.say(who, text, s),
+      sfx: (id) => this.sfx(id),
+      shake: (i, ms) => this.fx.shake(i, ms),
+      flash: (c, ms) => this.fx.flash(c, ms),
+      marker: (art, x, y, seconds) => this.showMarker(art, x, y, seconds),
+    };
+  }
+
+  private showMarker(art: string, x: number, y: number, seconds: number): void {
+    if (!this.textures.exists(art)) return;
+    const img = this.add.image(x, y, art).setDepth(y);
+    this.tweens.add({ targets: img, scale: 1.15, duration: 180, yoyo: true, repeat: -1 });
+    this.time.delayedCall(seconds * 1000, () => img.destroy());
+  }
+
+  private after(seconds: number, fn: () => void, room: boolean): void {
+    this.timers.push({ at: this.run.time + seconds, fn, room });
+  }
+
+  private runTimers(): void {
+    if (!this.timers.length) return;
+    const now = this.run.time;
+    const due = this.timers.filter((t) => t.at <= now);
+    if (!due.length) return;
+    this.timers = this.timers.filter((t) => t.at > now);
+    for (const t of due) t.fn();
+  }
+
+  // ---- input -----------------------------------------------------------------------------------
+
+  private setupInput(): void {
+    const kb = this.input.keyboard!;
+    this.keys = kb.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,SHIFT,E,Q,F,R,C,TAB,ESC,M', true) as Record<string, Phaser.Input.Keyboard.Key>;
+    this.input.mouse?.disableContextMenu();
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (p.rightButtonDown() && !this.dead && !this.player.controlLocked) this.useActive();
+    });
+  }
+
+  private readInput(): PlayerInput {
+    const k = this.keys;
+    const mx = (k.D.isDown ? 1 : 0) - (k.A.isDown ? 1 : 0);
+    const my = (k.S.isDown ? 1 : 0) - (k.W.isDown ? 1 : 0);
+    const ax = (k.RIGHT.isDown ? 1 : 0) - (k.LEFT.isDown ? 1 : 0);
+    const ay = (k.DOWN.isDown ? 1 : 0) - (k.UP.isDown ? 1 : 0);
+    const p = this.input.activePointer;
+    const world = this.cameras.main.getWorldPoint(p.x, p.y);
+    let aimX = world.x;
+    let aimY = world.y;
+    let fire = p.leftButtonDown();
+    if (ax || ay) {
+      aimX = this.player.x + ax * 100;
+      aimY = this.player.y + ay * 100;
+      fire = true;
+    }
+    return { moveX: mx, moveY: my, aimX, aimY, fire, dash: Phaser.Input.Keyboard.JustDown(k.SPACE), sneak: k.SHIFT.isDown };
+  }
+
+  private handleButtons(): void {
+    const k = this.keys;
+    const JD = Phaser.Input.Keyboard.JustDown;
+    if (JD(k.ESC)) {
+      this.openPause();
+      return;
+    }
+    if (JD(k.TAB) || JD(k.M)) this.hud.toggleMap();
+    const e = JD(k.E);
+    const q = JD(k.Q);
+    const f = JD(k.F);
+    const r = JD(k.R);
+    const c = JD(k.C);
+    if (this.dead || this.player.controlLocked || this.player.falling > 0) return;
+    if (e) this.interactable?.act();
+    if (q) this.callRick();
+    if (f) this.mechanics.forEach((m) => m.inst.onAction?.());
+    if (r) this.useConsumable();
+    if (c) this.useActive();
+  }
+
+  private openPause(): void {
+    if (this.dead || this.ended) return;
+    this.scene.pause();
+    this.scene.launch('Pause', {
+      onResume: () => {
+        this.scene.resume();
+        this.input.keyboard?.resetKeys();
+      },
+      onQuit: () => {
+        this.scene.resume();
+        this.finishRun(false, true);
+      },
+      model: () => this.hudModel(),
+    });
+  }
+
+  // ---- main loop -------------------------------------------------------------------------------
+
+  override update(_time: number, delta: number): void {
+    const dt = Math.min(delta / 1000, 1 / 20);
+    this.frameDelta = dt;
+    this.fx.update(dt);
+    if (this.fx.stopped || this.transitioning || !this.roomView) return;
+    const run = this.run;
+    run.time += dt;
+    this.runTimers();
+    if (!this.roomView) return;
+    if (this.hudTimer) this.hudTimer.left = Math.max(0, this.hudTimer.left - dt);
+    const changes = run.statuses.tick(dt);
+    if (changes.length) this.onStatusChanges(changes);
+
+    const input = this.readInput();
+    this.handleButtons();
+    if (!this.roomView || this.ended) return;
+    if (this.dead) return;
+    this.player.update(dt, input);
+    this.checkTiles();
+    for (const m of this.mechanics) m.inst.update?.(dt);
+    this.script?.update?.(dt);
+    if (!this.roomView) return;
+
+    for (const e of [...this.enemies]) {
+      if (!e.alive) continue;
+      const poison = e.tick(dt, run.time);
+      if (poison > 0) this.hitEnemy(e, poison, { source: 'poison' });
+      if (e.alive && e.pending === 'kill') this.hitEnemy(e, e.hp + 1, { source: 'hazard' });
+      else if (e.alive && e.pending === 'despawn') this.despawnEnemy(e);
+    }
+    this.separateEnemies();
+    this.checkContacts();
+
+    this.playerShots.update(
+      dt,
+      this.roomView,
+      () => this.sfx('bounce'),
+      (p, wall) => wall && this.fx.burst('hit', p.x, p.y, 3),
+    );
+    this.checkPlayerShots();
+    this.enemyShots.update(
+      dt,
+      this.roomView,
+      () => undefined,
+      (p, wall) => wall && this.fx.burst('hit', p.x, p.y, 2),
+    );
+    this.checkEnemyShots();
+    const reduced = this.settings().reducedFlash;
+    this.hazards.update(dt, run.time, { x: this.player.x, y: this.player.y, radius: this.player.radius }, (h) => this.damagePlayer(h, 'a hazard'), reduced);
+    this.telegraphs.draw(run.time, reduced);
+
+    this.objects.update(dt, this.player, this.stats().magnet, (p) => this.collectPickup(p));
+    this.objects.tickPedestals(dt);
+    this.interactable = this.objects.nearestInteractable(
+      this.player,
+      (p) => this.pedestalLabel(p),
+      (p) => this.takePedestal(p),
+    );
+
+    this.updateDoors(false);
+    this.checkRoomClear();
+    this.checkDoorTransition();
+  }
+
+  // ---- acts and rooms --------------------------------------------------------------------------
+
+  private floorConfig(act: ActDef): FloorConfig {
+    if (act.layout.kind !== 'procedural') throw new Error('floorConfig needs a procedural layout');
+    const layout = act.layout;
+    const special = act.specialRoom ? this.reg.specialRooms.get(act.specialRoom) : undefined;
+    return {
+      roomCount: layout.roomCount,
+      templates: layout.templates,
+      startTemplate: layout.startTemplate,
+      treasureTemplate: layout.treasureTemplate,
+      shopTemplate: layout.shopTemplate,
+      special: special ? { id: special.id, templates: special.templates } : undefined,
+      finaleTemplate: this.stageTemplate(act, 0),
+      calmPrefix: layout.calmPrefix,
+    };
+  }
+
+  private stageTemplate(act: ActDef, stage: number): ContentId {
+    const s = act.finale[stage];
+    return s.kind === 'boss' ? s.template : this.reg.encounters.get(s.encounter)!.template;
+  }
+
+  private startAct(index: number): void {
+    const run = this.run;
+    this.teardownRoom();
+    run.actIndex = index;
+    const act = run.act;
+    this.player.setTexture(this.playerTexture());
+    this.actors.clear();
+    this.actors.set(act.playable, this.playerAnchor);
+    this.mechanics = act.mechanics.map((id) => {
+      const def = this.reg.mechanics.get(id)!;
+      return { def, inst: def.create(this.makeMechanicApi()) };
+    });
+    const floor =
+      act.layout.kind === 'procedural'
+        ? generateFloor(this.floorConfig(act), run.rng.fork(`floor:${act.id}`))
+        : buildFixedFloor(act.layout);
+    run.floor = floor;
+    run.rooms = floor.rooms.map((r) => freshRoomState(r.kind));
+    run.stage = -1;
+    for (const s of act.startStatuses ?? []) run.statuses.add(s);
+    this.invalidateStats();
+    this.mechanics.forEach((m) => m.inst.onActStart?.());
+    this.playCutscenes(act.intro ?? [], () => {
+      this.enterRoom(floor.startId);
+      this.hud.banner(act.name, act.subtitle);
+    });
+  }
+
+  private enterRoom(id: number, from?: Dir): void {
+    const run = this.run;
+    const floor = run.floor!;
+    this.leaveRoom();
+    const fr = floor.rooms[id];
+    const st = run.rooms[id];
+    const firstVisit = !st.visited;
+    st.visited = true;
+    st.seen = true;
+    for (const n of Object.values(fr.neighbors)) if (n !== undefined) run.rooms[n].seen = true;
+    run.currentRoom = id;
+    run.stage = fr.kind === 'finale' ? 0 : -1;
+    const doors: DoorSpec[] = (Object.entries(fr.neighbors) as [Dir, number][]).map(([dir, target]) => ({
+      dir,
+      target,
+      targetKind: run.rooms[target].kind,
+    }));
+    const tplId = fr.kind === 'finale' ? this.stageTemplate(run.act, 0) : fr.template;
+    this.buildRoom(this.reg.templates.get(tplId)!, doors, st, id, fr, firstVisit, from);
+  }
+
+  /** Later finale stages happen in rooms off the floor grid (e.g. the escape after a boss). */
+  private enterStage(stage: number): void {
+    this.leaveRoom();
+    this.run.stage = stage;
+    const st = freshRoomState('finale');
+    st.visited = true;
+    const tpl = this.reg.templates.get(this.stageTemplate(this.run.act, stage))!;
+    this.buildRoom(tpl, [], st, -1 - stage, null, true);
+  }
+
+  private buildRoom(tpl: ParsedTemplate, doors: DoorSpec[], st: RoomState, id: number, fr: FloorRoom | null, firstVisit: boolean, from?: Dir): void {
+    const run = this.run;
+    const act = run.act;
+    const view = new RoomView(this, tpl, act.biome, doors, this.hashSeed() + id * 101);
+    this.roomView = view;
+    this.roomState = st;
+    this.colliders = [
+      this.physics.add.collider(this.player.sprite, view.walls),
+      this.physics.add.collider(this.player.sprite, view.blocks),
+      this.physics.add.collider(this.player.sprite, this.objects.blockers),
+      this.physics.add.collider(this.enemyGroup, view.walls),
+      this.physics.add.collider(this.enemyGroup, view.blocks, undefined, (e) => !(e as Enemy).def.flying),
+      this.physics.add.collider(this.enemyGroup, this.objects.blockers),
+    ];
+    this.roomInfoObj = this.makeRoomInfo(id, tpl, st, fr, firstVisit);
+    this.scriptApi = this.makeScriptApi();
+
+    const pos = from ? this.doorEntry(view, from) : (this.roomInfoObj.markers('P')[0] ?? this.arrivalSpot(view, st.kind));
+    this.player.setPosition(pos.x, pos.y);
+    this.player.dashLeft = 0;
+    this.lastSafe = { ...pos };
+    this.setupCamera(view);
+
+    this.restoreContents(st);
+    if (st.kind === 'treasure') this.stockTreasure(st);
+    if (st.kind === 'shop') this.stockShop(st, firstVisit);
+    if (st.kind === 'combat' && !st.cleared) this.spawnMarkerEnemies(tpl);
+
+    this.script = null;
+    if (fr?.kind === 'special' && fr.specialId) {
+      const sr = this.reg.specialRooms.get(fr.specialId);
+      if (sr?.script) this.script = sr.script(this.scriptApi);
+    }
+    if (fr?.script) this.script = this.reg.scripts.get(fr.script)?.script(this.scriptApi) ?? null;
+    const stageIndex = fr ? (fr.kind === 'finale' ? 0 : -1) : run.stage;
+    if (stageIndex >= 0) this.startStage(stageIndex, st, firstVisit);
+    this.script?.onEnter?.(firstVisit);
+    this.mechanics.forEach((m) => m.inst.onRoomEnter?.(this.roomInfoObj!));
+    if (st.kind === 'combat' && !st.cleared && this.hostileCount() === 0) st.cleared = true;
+
+    this.doorsOpen = true;
+    this.updateDoors(true);
+    this.updateMusic();
+  }
+
+  private startStage(stage: number, st: RoomState, firstVisit: boolean): void {
+    const act = this.run.act;
+    const spec = act.finale[stage];
+    if (st.cleared) {
+      this.spawnExit();
+      return;
+    }
+    if (spec.kind === 'boss') {
+      const at = this.roomInfoObj!.markers('e')[0] ?? { x: this.roomView!.widthPx / 2, y: this.roomView!.heightPx / 2 };
+      const boss = this.spawnEnemy(spec.boss, at.x, at.y, { delay: 1.0 });
+      this.bossEnemy = boss;
+      if (boss && firstVisit) {
+        this.hud.banner(boss.def.boss?.title ?? boss.def.name, 'BOSS', 0xe0484d);
+        this.time.delayedCall(300, () => this.sfx('boss-roar'));
+      }
+    } else {
+      const enc = this.reg.encounters.get(spec.encounter)!;
+      this.script = enc.script(this.scriptApi!);
+    }
+  }
+
+  /** Where to stand with no door to walk in through (a start room, or a debug jump). */
+  private arrivalSpot(view: RoomView, kind: RoomState['kind']): Vec {
+    // Hostile rooms spawn their enemies mid-room, so arrive where the south door would put you.
+    if (kind !== 'start' && kind !== 'calm') {
+      const c = doorCell(view.cols, view.rows, 'S');
+      if (view.template.tiles[c.row]?.[c.col] === 'floor') return this.doorEntry(view, 'S');
+    }
+    return this.openSpotNear(view.widthPx / 2, view.heightPx / 2);
+  }
+
+  private doorEntry(view: RoomView, from: Dir): Vec {
+    const c = doorCell(view.cols, view.rows, from);
+    const p = view.cellCenter(c.col, c.row);
+    const v = DIR_VEC[from];
+    return { x: p.x - v.dx * 4, y: p.y - v.dy * 4 };
+  }
+
+  private setupCamera(view: RoomView): void {
+    const cam = this.cameras.main;
+    cam.setBackgroundColor(Phaser.Display.Color.IntegerToColor(view.biome.palette.background).darken(35).color);
+    const vw = cam.width;
+    const vh = cam.height;
+    cam.stopFollow();
+    if (view.widthPx <= vw && view.heightPx <= vh) {
+      cam.removeBounds();
+      cam.centerOn(view.widthPx / 2, view.heightPx / 2);
+      return;
+    }
+    const bx = view.widthPx < vw ? (view.widthPx - vw) / 2 : 0;
+    const by = view.heightPx < vh ? (view.heightPx - vh) / 2 : 0;
+    cam.setBounds(bx, by, Math.max(view.widthPx, vw), Math.max(view.heightPx, vh));
+    cam.startFollow(this.player.sprite, true, 0.14, 0.14);
+    cam.centerOn(this.player.x, this.player.y);
+  }
+
+  private hashSeed(): number {
+    let h = 0;
+    for (const ch of this.run.seed) h = (h * 31 + ch.charCodeAt(0)) | 0;
+    return Math.abs(h) % 100000;
+  }
+
+  private makeRoomInfo(id: number, tpl: ParsedTemplate, st: RoomState, fr: FloorRoom | null, firstVisit: boolean): RoomInfo {
+    const view = this.roomView!;
+    const player = this.player;
+    return {
+      id,
+      get kind() {
+        return st.kind;
+      },
+      templateId: tpl.id,
+      specialId: fr?.specialId,
+      get cleared() {
+        return st.cleared;
+      },
+      firstVisit,
+      prefixIndex: fr?.prefixIndex,
+      isLastPrefix: !!fr?.lastPrefix,
+      widthPx: view.widthPx,
+      heightPx: view.heightPx,
+      tileAt: (x, y) => view.tileAt(x, y),
+      tileCenter: (tx, ty) => view.cellCenter(tx, ty),
+      markers: (ch) => tpl.markers.filter((m) => m.ch === ch).map((m) => view.cellCenter(m.col, m.row)),
+      randomFloorPoint: (rng, minDist = 0) => {
+        for (let i = 0; i < 60; i++) {
+          const col = rng.int(0, tpl.cols - 1);
+          const row = rng.int(0, tpl.rows - 1);
+          if (tpl.tiles[row][col] !== 'floor') continue;
+          const p = view.cellCenter(col, row);
+          if (Math.hypot(p.x - player.x, p.y - player.y) >= minDist) return p;
+        }
+        return { x: view.widthPx / 2, y: view.heightPx / 2 };
+      },
+      data: st.data,
+    };
+  }
+
+  private leaveRoom(): void {
+    if (!this.roomView) return;
+    this.script?.onExit?.();
+    const st = this.roomState;
+    st.pickups = this.objects.pickups.filter((p) => !p.collected).map((p) => ({ id: p.def.id, x: p.x, y: p.y }));
+    st.pedestals = this.objects.pedestals
+      .filter((p) => !p.taken)
+      .map((p) => ({ itemId: p.ware.item?.id, pickupId: p.ware.pickup?.id, x: p.x, y: p.y, price: p.price, group: p.group }));
+    this.teardownRoom();
+  }
+
+  private teardownRoom(): void {
+    for (const e of this.enemies) e.remove();
+    this.enemies = [];
+    this.bossEnemy = null;
+    this.playerShots?.clear();
+    this.enemyShots?.clear();
+    this.hazards?.clear();
+    this.telegraphs?.clear();
+    this.objects?.clear();
+    this.fx?.clearBubbles();
+    this.colliders.forEach((c) => c.destroy());
+    this.colliders = [];
+    this.roomView?.destroy();
+    this.roomView = null;
+    this.exitProp = null;
+    this.script = null;
+    this.scriptLock = false;
+    this.objectiveText = null;
+    this.hudTimer = null;
+    this.hintText = null;
+    this.timers = this.timers.filter((t) => !t.room);
+    for (const key of [...this.actors.keys()]) if (key !== this.run?.act.playable && key !== 'rick') this.actors.delete(key);
+    this.hud?.hideChoice();
+  }
+
+  private restoreContents(st: RoomState): void {
+    for (const p of st.pickups) this.spawnPickupAt(p.id, p.x, p.y, false);
+    st.pickups = [];
+    for (const p of st.pedestals) this.placeWare(p);
+    st.pedestals = [];
+    for (const spec of (st.data.__props as PropSpec[] | undefined) ?? []) this.objects.addProp(spec);
+  }
+
+  private transitionTo(fn: () => void): void {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    const cam = this.cameras.main;
+    cam.fadeOut(110, 0, 0, 0);
+    cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      fn();
+      cam.fadeIn(140, 0, 0, 0);
+      this.transitioning = false;
+    });
+  }
+
+  private checkDoorTransition(): void {
+    if (this.transitioning || !this.doorsOpen || this.player.falling > 0 || !this.roomView) return;
+    const p = this.player;
+    const v = this.roomView;
+    for (const d of v.doors) {
+      if (!d.open) continue;
+      const inX = Math.abs(p.x - d.x) < TILE * 0.7;
+      const inY = Math.abs(p.y - d.y) < TILE * 0.7;
+      let go = false;
+      switch (d.spec.dir) {
+        case 'N':
+          go = inX && p.y < TILE * 0.95;
+          break;
+        case 'S':
+          go = inX && p.y > v.heightPx - TILE * 0.95;
+          break;
+        case 'W':
+          go = inY && p.x < TILE * 0.95;
+          break;
+        case 'E':
+          go = inY && p.x > v.widthPx - TILE * 0.95;
+          break;
+      }
+      if (go) {
+        const target = d.spec.target;
+        const from = OPPOSITE[d.spec.dir];
+        this.transitionTo(() => this.enterRoom(target, from));
+        return;
+      }
+    }
+  }
+
+  hostileCount(): number {
+    let n = 0;
+    for (const e of this.enemies) if (e.alive && !e.passive) n++;
+    return n;
+  }
+
+  private updateDoors(force: boolean): void {
+    if (!this.roomView) return;
+    const lock = this.scriptLock || (!this.roomState.cleared && this.hostileCount() > 0);
+    if (!force && lock === !this.doorsOpen) return;
+    this.doorsOpen = !lock;
+    this.roomView.setDoorsOpen(this.doorsOpen);
+    if (!force && this.roomView.doors.length) this.sfx(this.doorsOpen ? 'door-open' : 'door-close');
+  }
+
+  private checkRoomClear(): void {
+    const st = this.roomState;
+    if (!this.roomView || st.cleared || st.kind !== 'combat') return;
+    if (this.hostileCount() > 0) return;
+    if (this.script?.onEnemiesCleared?.()) return;
+    this.clearRoom(true);
+  }
+
+  private clearRoom(reward: boolean): void {
+    const st = this.roomState;
+    if (st.cleared) return;
+    st.cleared = true;
+    const run = this.run;
+    run.stats.roomsCleared++;
+    this.sfx('room-clear');
+    runHook(this.sources(), 'onRoomClear', this.ctx);
+    this.onStatusChanges(run.statuses.roomCleared());
+    if (run.inventory.chargeActive(1)) {
+      const a = this.reg.items.get(run.inventory.active!.id);
+      this.hud.toast(`${a?.name ?? 'Active item'} is charged! (Right-click / C)`, { color: 0x97ce4c });
+    }
+    this.mechanics.forEach((m) => m.inst.onRoomClear?.(this.roomInfoObj!));
+    if (reward) this.rollRoomReward();
+  }
+
+  private rollRoomReward(): void {
+    const rng = this.run.play;
+    if (!rng.chance(ECONOMY.roomRewardChance)) return;
+    const at = this.openSpotNear(this.roomView!.widthPx / 2, this.roomView!.heightPx / 2);
+    const kind = rng.weighted([
+      { id: 'scrap', weight: 55 },
+      { id: 'heart-half', weight: 22 },
+      { id: 'heart-full', weight: 8 },
+      { id: 'consumable', weight: 15 },
+    ]);
+    if (kind === 'consumable') {
+      const id = this.randomItem({ kind: 'consumable' });
+      if (id) {
+        this.placeWare({ itemId: id, x: at.x, y: at.y });
+        return;
+      }
+    }
+    if (kind === 'scrap') {
+      const n = rng.int(1, 3);
+      for (let i = 0; i < n; i++) this.spawnPickupAt('scrap', at.x, at.y, true);
+    } else {
+      this.spawnPickupAt(kind === 'consumable' ? 'scrap' : kind, at.x, at.y, true);
+    }
+  }
+
+  private openSpotNear(x: number, y: number): Vec {
+    const view = this.roomView!;
+    let best = { x, y };
+    let bestD = Infinity;
+    for (let r = 0; r < view.rows; r++) {
+      for (let c = 0; c < view.cols; c++) {
+        if (view.template.tiles[r][c] !== 'floor') continue;
+        const p = view.cellCenter(c, r);
+        const d = Math.hypot(p.x - x, p.y - y);
+        if (d < bestD) {
+          bestD = d;
+          best = p;
+        }
+      }
+    }
+    return best;
+  }
+
+  private spawnMarkerEnemies(tpl: ParsedTemplate): void {
+    const run = this.run;
+    const pool = enemyPoolFor(this.reg, run.episode.id, run.act);
+    if (!pool.length) return;
+    const marks = tpl.markers.filter((m) => m.ch === 'e' || m.ch === 'E');
+    marks.forEach((m, i) => {
+      const pos = this.roomView!.cellCenter(m.col, m.row);
+      const id = run.play.weighted(pool);
+      const elite = m.ch === 'E' || (run.stats.roomsCleared > 0 && run.play.chance(run.act.eliteChance));
+      this.spawnEnemy(id, pos.x, pos.y, { elite, delay: ENEMIES.spawnDelay + i * 0.07 });
+    });
+  }
+
+  private stockTreasure(st: RoomState): void {
+    if (st.stocked) return;
+    st.stocked = true;
+    const at = this.roomInfoObj!.markers('I')[0] ?? { x: this.roomView!.widthPx / 2, y: this.roomView!.heightPx / 2 };
+    const rare = this.run.play.chance(0.3);
+    const id = this.randomItem(rare ? { rarity: 'rare' } : {}) ?? this.randomItem({});
+    if (id) this.placeWare({ itemId: id, x: at.x, y: at.y });
+    else for (let i = 0; i < 5; i++) this.spawnPickupAt('scrap', at.x, at.y, true);
+  }
+
+  private stockShop(st: RoomState, firstVisit: boolean): void {
+    const act = this.run.act;
+    const info = this.roomInfoObj!;
+    const keeperAt = info.markers('K')[0];
+    if (keeperAt && act.shop) {
+      this.addProp({ art: act.shop.keeperArt, x: keeperAt.x, y: keeperAt.y, solid: true, actor: 'shopkeeper' });
+      if (firstVisit) this.after(0.4, () => this.fx.bubble({ x: keeperAt.x, y: keeperAt.y - 60 }, `${act.shop!.name}: Everything's for sale!`, 0xffd54a, 2.4), true);
+    }
+    if (st.stocked) return;
+    st.stocked = true;
+    const spots = info.markers('I');
+    const mult = this.stats().shopPriceMult * (act.shop?.priceMult ?? 1);
+    const price = (n: number) => Math.max(1, Math.round(n * mult));
+    const wares: Ware[] = [];
+    const taken: ContentId[] = [];
+    const stock = (id: ContentId | null | undefined): boolean => {
+      const item = id ? this.reg.items.get(id) : undefined;
+      if (!item) return false;
+      wares.push({ item });
+      taken.push(item.id);
+      return true;
+    };
+    // The shop's staple is reserved first, so no random roll can put a second one on the shelf.
+    const staple = act.shop?.alwaysStocks?.find((id) => this.reg.items.has(id));
+    if (staple) taken.push(staple);
+    stock(this.randomItem({ exclude: taken }));
+    stock(staple ?? this.randomItem({ kind: 'consumable', exclude: taken }));
+    wares.push({ pickup: this.reg.pickups.get('heart-full') });
+    const extra = this.run.play.chance(0.6) ? this.randomItem({ kind: 'consumable', exclude: taken }) : null;
+    if (!stock(extra)) wares.push({ pickup: this.reg.pickups.get('heart-half') });
+    wares.slice(0, spots.length).forEach((w, i) => {
+      const base = w.item ? w.item.price : w.pickup?.id === 'heart-full' ? ECONOMY.prices.heartFull : ECONOMY.prices.heartHalf;
+      this.placeWare({ itemId: w.item?.id, pickupId: w.pickup?.id, x: spots[i].x, y: spots[i].y, price: price(base) });
+    });
+  }
+
+  private startMusicFor(): string {
+    const act = this.run.act;
+    if (this.bossEnemy?.alive) return this.bossEnemy.def.boss?.music ?? 'boss';
+    return act.music ?? act.biome.music;
+  }
+
+  private updateMusic(): void {
+    svc().audio.music(this.startMusicFor());
+  }
+
+  // ---- finales and act flow ------------------------------------------------------------------
+
+  private onBossKilled(boss: Enemy, at: Vec): void {
+    this.bossEnemy = null;
+    this.clearEnemiesSilently();
+    this.enemyShots.clear();
+    this.hazards.clear();
+    this.telegraphs.clear();
+    this.fx.shake(14, 500);
+    this.fx.flash(0xffffff, 180);
+    this.updateMusic();
+    const info = boss.def.boss!;
+    if (this.script?.onBossDefeated?.()) return;
+    const finish = () => {
+      info.onDefeat?.(this.scriptApi!, at);
+      if (info.reward && !this.run.inventory.has(info.reward)) {
+        const c = this.openSpotNear(this.roomView!.widthPx / 2 - TILE * 2, this.roomView!.heightPx / 2);
+        this.placeWare({ itemId: info.reward, x: c.x, y: c.y });
+      }
+      this.completeStage();
+    };
+    if (info.defeatCutscene) this.after(0.6, () => this.playCutscenes([info.defeatCutscene!], finish), true);
+    else finish();
+  }
+
+  private completeStage(): void {
+    const st = this.roomState;
+    if (!st.cleared) {
+      st.cleared = true;
+      this.run.stats.roomsCleared++;
+    }
+    this.scriptLock = false;
+    this.objectiveText = null;
+    this.hudTimer = null;
+    this.spawnExit();
+  }
+
+  private spawnExit(): void {
+    if (this.exitProp || !this.roomView) return;
+    const act = this.run.act;
+    const more = this.run.stage + 1 < act.finale.length;
+    const marker = this.roomInfoObj!.markers('X')[0];
+    const pos = marker ?? this.openSpotNear(this.roomView.widthPx / 2 + TILE * 2, this.roomView.heightPx / 2);
+    this.exitProp = this.objects.addProp({
+      art: act.exitArt ?? 'exit-portal',
+      x: pos.x,
+      y: pos.y + 24,
+      interact: { label: more ? 'Keep going' : (act.exitLabel ?? 'Leave'), fn: () => this.useExit() },
+    });
+    this.exitProp.pulse();
+    this.fx.burst('portal', pos.x, pos.y);
+    this.sfx('portal');
+  }
+
+  private useExit(): void {
+    const act = this.run.act;
+    const next = this.run.stage + 1;
+    if (next < act.finale.length) this.transitionTo(() => this.enterStage(next));
+    else this.finishAct();
+  }
+
+  private finishAct(): void {
+    if (this.finishingAct || this.ended) return;
+    this.finishingAct = true;
+    const run = this.run;
+    this.mechanics.forEach((m) => m.inst.onActEnd?.());
+    run.statuses.actEnded();
+    this.invalidateStats();
+    const act = run.act;
+    this.player.setControlLocked(false);
+    this.playCutscenes(act.outro ?? [], () => {
+      this.finishingAct = false;
+      if (run.isLastAct) this.finishRun(true);
+      else this.startAct(run.actIndex + 1);
+    });
+  }
+
+  finishRun(victory: boolean, quit = false): void {
+    if (this.ended) return;
+    this.ended = true;
+    const s = svc();
+    const save = s.save;
+    const run = this.run;
+    const ep = run.episode;
+    const rec = (save.episodes[ep.id] ??= { attempts: 0, clears: 0, bestTimeMs: null });
+    const banked = victory ? run.scrap : Math.floor(run.scrap * ECONOMY.bankOnDeath);
+    save.bankedScrap += banked;
+    save.lifetime.runs++;
+    if (!victory) save.lifetime.deaths++;
+    save.lifetime.kills += run.stats.kills;
+    save.lifetime.scrapEarned += run.stats.scrapEarned;
+    const newUnlocks: string[] = [];
+    if (victory) {
+      rec.clears++;
+      const ms = Math.round(run.time * 1000);
+      if (rec.bestTimeMs === null || ms < rec.bestTimeMs) rec.bestTimeMs = ms;
+      for (const id of ep.unlocksOnClear) {
+        if (!save.unlocked.includes(id)) {
+          save.unlocked.push(id);
+          newUnlocks.push(id);
+        }
+      }
+    }
+    persist();
+    const next = nextUp(this.reg.listings, (id) => (save.episodes[id]?.clears ?? 0) > 0);
+    const summary: RunSummary = {
+      victory,
+      episodeId: ep.id,
+      episodeTitle: ep.title,
+      seed: run.seed,
+      seconds: run.time,
+      kills: run.stats.kills,
+      rooms: run.stats.roomsCleared,
+      items: run.stats.itemsFound.filter((id) => this.reg.items.get(id)?.rarity !== 'story').map((id) => this.reg.items.get(id)?.name ?? id),
+      scrapBanked: banked,
+      cause: quit ? 'Quit to the Garage' : run.lastDamageSource || 'Unknown',
+      newUnlocks: newUnlocks.map((id) => this.reg.items.get(id)?.name ?? id),
+      nextEpisode: next ? { title: next.title, playable: !!next.def } : null,
+      quit,
+    };
+    svc().audio.music(null);
+    this.scene.stop('Hud');
+    this.scene.stop('Cutscene');
+    this.scene.start('GameOver', summary);
+  }
+
+  playCutscenes(ids: ContentId[], done?: () => void): void {
+    const list = ids.filter((id) => this.reg.cutscenes.has(id));
+    if (!list.length) {
+      done?.();
+      return;
+    }
+    const save = svc().save;
+    for (const id of list) if (!save.seenCutscenes.includes(id)) save.seenCutscenes.push(id);
+    this.scene.pause();
+    this.scene.launch('Cutscene', {
+      ids: list,
+      onDone: () => {
+        this.scene.resume();
+        this.input.keyboard?.resetKeys();
+        done?.();
+      },
+    });
+  }
+
+  // ---- player ----------------------------------------------------------------------------------
+
+  private checkTiles(): void {
+    if (!this.roomView || this.player.falling > 0) return;
+    const tile = this.roomView.tileAt(this.player.x, this.player.y);
+    if (tile === 'cliff') {
+      const allowed = this.mechanics.some((m) => m.inst.allowsTile?.('cliff') === true);
+      if (!allowed) this.playerFalls();
+    } else if (tile === 'floor' || tile === 'slow') {
+      this.lastSafe = { x: this.player.x, y: this.player.y };
+    }
+  }
+
+  private playerFalls(): void {
+    const p = this.player;
+    this.sfx('fall');
+    this.fx.burst('smoke', p.x, p.y, 6);
+    this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'fall', x: p.x, y: p.y }));
+    p.startFall(() => {
+      p.setPosition(this.lastSafe.x, this.lastSafe.y);
+      p.iframes = Math.max(p.iframes, 0.8);
+      const handled = this.mechanics.some((m) => m.inst.onFall?.() === true);
+      if (!handled) this.damagePlayer(PLAYER.fallDamage, 'a long fall', { ignoreInvulnerability: true });
+    });
+  }
+
+  onFire(angle: number): void {
+    const st = this.stats();
+    const weaponDef = this.reg.items.get(this.run.inventory.weapon);
+    const n = Math.max(1, Math.round(st.projectiles));
+    const spread = st.spread + (n > 1 ? 0.14 * (n - 1) : 0);
+    const p = this.player;
+    for (let i = 0; i < n; i++) {
+      const a = n > 1 ? angle - spread / 2 + (spread * i) / (n - 1) : angle;
+      this.playerShots.spawn({
+        x: p.x + Math.cos(a) * 18,
+        y: p.y + Math.sin(a) * 18 - 6,
+        angle: a,
+        speed: st.shotSpeed,
+        damage: st.damage,
+        radius: st.shotSize,
+        life: st.range / st.shotSpeed,
+        bounces: Math.round(st.bounces),
+        texture: 'shot-player',
+        tint: weaponDef?.weapon?.color ?? 0x97ce4c,
+        source: 'shot',
+      });
+    }
+    this.sfx((weaponDef?.weapon?.damageMult ?? 1) > 1.2 ? 'shoot-heavy' : 'shoot');
+    runHook(this.sources(), 'onFire', this.ctx, { angle, x: p.x, y: p.y });
+    this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'fire', angle }));
+  }
+
+  onDash(): void {
+    this.sfx('dash');
+    runHook(this.sources(), 'onDash', this.ctx);
+    this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'dash' }));
+  }
+
+  damagePlayer(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): void {
+    if (this.dead || this.ended || halves <= 0 || this.godModeOn) return;
+    const p = this.player;
+    if (!opts?.ignoreInvulnerability && p.isInvulnerable) return;
+    const run = this.run;
+    run.hp -= halves;
+    run.lastDamageSource = source;
+    run.stats.damageTaken += halves;
+    p.iframes = PLAYER.hurtIframes;
+    this.sfx('hurt');
+    this.fx.shake(9, 180);
+    this.fx.flash(0xff3040, 90);
+    this.fx.hitStop(55);
+    this.fx.burst('hit', p.x, p.y - 10, 8);
+    runHook(this.sources(), 'onDamageTaken', this.ctx, halves, source);
+    this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'hurt', halves, source }));
+    if (run.hp <= 0) {
+      run.hp = 0;
+      this.onDeath();
+    }
+  }
+
+  healPlayer(halves: number): void {
+    if (this.run.hp >= this.maxHp()) return;
+    this.run.hp = Math.min(this.maxHpValue, this.run.hp + halves);
+    this.sfx('heal');
+    this.fx.burst('heal', this.player.x, this.player.y - 20);
+  }
+
+  private onDeath(): void {
+    this.dead = true;
+    this.player.setControlLocked(true);
+    this.sfx('death');
+    svc().audio.music(null);
+    (this.player.sprite.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+    this.tweens.add({
+      targets: this.player.sprite,
+      angle: 720,
+      scale: 0.2,
+      alpha: 0,
+      duration: 1100,
+      ease: 'Cubic.easeIn',
+      onComplete: () => this.finishRun(false),
+    });
+  }
+
+  // ---- combat ----------------------------------------------------------------------------------
+
+  spawnEnemy(id: ContentId, x: number, y: number, opts: { elite?: boolean; passive?: boolean; delay?: number } = {}): Enemy | null {
+    if (this.hostileCount() >= MAX_ENEMIES || !this.roomView) return null;
+    const def = this.reg.enemies.get(id);
+    if (!def) return null;
+    const e = new Enemy(this, this, def, x, y, opts);
+    this.enemies.push(e);
+    this.enemyGroup.add(e);
+    return e;
+  }
+
+  setHostile(e: Enemy): void {
+    if (!e.alive || !e.passive) return;
+    e.passive = false;
+    e.spawnLeft = 0.3;
+  }
+
+  private despawnEnemy(e: Enemy): void {
+    this.fx.burst('smoke', e.x, e.y, 6);
+    this.enemies = this.enemies.filter((o) => o !== e);
+    e.remove();
+  }
+
+  private clearEnemiesSilently(): void {
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      this.fx.burst('death', e.x, e.y, 6);
+      e.remove();
+    }
+    this.enemies = [];
+  }
+
+  enemyShot(spec: EnemyShotSpec & { x: number; y: number }, sourceName: string): void {
+    const n = spec.count ?? 1;
+    const spread = spec.spread ?? 0;
+    const kind = spec.kind ?? 'orb';
+    for (let i = 0; i < n; i++) {
+      const a = n > 1 ? spec.angle - spread / 2 + (spread * i) / (n - 1) : spec.angle;
+      this.enemyShots.spawn({
+        x: spec.x,
+        y: spec.y,
+        angle: a,
+        speed: spec.speed,
+        damage: spec.damage ?? 1,
+        radius: spec.radius ?? 9,
+        life: spec.life ?? 3.5,
+        bounces: spec.bounces ?? 0,
+        texture: `shot-${kind}`,
+        tint: spec.color,
+        spin: SPIN[kind] ?? 0,
+        tag: sourceName,
+        applies: spec.applies,
+      });
+    }
+  }
+
+  private spawnPlayerShot(spec: PlayerShotSpec): void {
+    const ice = spec.source === 'shard';
+    this.playerShots.spawn({
+      x: spec.x,
+      y: spec.y,
+      angle: spec.angle,
+      speed: spec.speed ?? 520,
+      damage: spec.damage,
+      radius: spec.radius ?? 7,
+      life: spec.life ?? 0.7,
+      texture: ice ? 'shot-ice' : 'shot-player',
+      tint: ice ? undefined : (spec.color ?? 0x97ce4c),
+      source: spec.source ?? 'shot',
+      tag: spec.tag,
+    });
+  }
+
+  private checkPlayerShots(): void {
+    this.playerShots.forEachActive((p) => {
+      for (const e of this.enemies) {
+        if (!e.alive || e.passive || e.spawnLeft > 0) continue;
+        if (Math.hypot(p.x - e.x, p.y - e.y) > p.radius + e.radius) continue;
+        if (e.def.shieldArc && !e.frozen) {
+          const from = Math.atan2(p.y - e.y, p.x - e.x);
+          const facing = (e.memory.facing as number | undefined) ?? Math.atan2(this.player.y - e.y, this.player.x - e.x);
+          const diff = Math.abs(Math.atan2(Math.sin(from - facing), Math.cos(from - facing)));
+          if (diff < ((e.def.shieldArc / 2) * Math.PI) / 180) {
+            this.fx.burst('spark', p.x, p.y, 5);
+            this.sfx('bounce');
+            p.kill();
+            return;
+          }
+        }
+        this.hitEnemy(e, p.damage, { source: p.source, tag: p.tag, bounced: p.bounced, angle: Math.atan2(p.vy, p.vx) });
+        this.fx.burst('hit', p.x, p.y, 4);
+        p.kill();
+        return;
+      }
+    });
+  }
+
+  private checkEnemyShots(): void {
+    const pl = this.player;
+    this.enemyShots.forEachActive((p) => {
+      if (Math.hypot(p.x - pl.x, p.y - pl.y) > p.radius + pl.radius * 0.75) return;
+      if (pl.isInvulnerable) return;
+      this.damagePlayer(p.damage, p.tag ?? 'a stray shot');
+      if (p.applies) this.applyStatus(p.applies);
+      p.kill();
+    });
+  }
+
+  private checkContacts(): void {
+    const p = this.player;
+    for (const e of this.enemies) {
+      if (!e.alive || e.passive || e.spawnLeft > 0 || e.frozen || e.def.contactDamage <= 0) continue;
+      if (Math.hypot(e.x - p.x, e.y - p.y) < e.radius + p.radius * 0.8 && !p.isInvulnerable) {
+        this.damagePlayer(e.def.contactDamage, e.def.name);
+        p.knockback(Math.atan2(p.y - e.y, p.x - e.x), 320);
+      }
+    }
+    if (p.isDashing) {
+      for (const e of this.enemies) {
+        if (!e.alive || e.passive || p.dashHits.has(e.uid)) continue;
+        if (Math.hypot(e.x - p.x, e.y - p.y) < e.radius + p.radius + 4) {
+          p.dashHits.add(e.uid);
+          runHook(this.sources(), 'onDashContact', this.ctx, e);
+        }
+      }
+    }
+  }
+
+  private separateEnemies(): void {
+    const list = this.enemies;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a.alive || a.boss || a.def.flying) continue;
+      for (let j = i + 1; j < list.length; j++) {
+        const b = list[j];
+        if (!b.alive || b.boss || b.def.flying) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.hypot(dx, dy) || 0.01;
+        const overlap = a.radius + b.radius - d;
+        if (overlap <= 0) continue;
+        const push = overlap * 5;
+        a.knockVx -= (dx / d) * push;
+        a.knockVy -= (dy / d) * push;
+        b.knockVx += (dx / d) * push;
+        b.knockVy += (dy / d) * push;
+      }
+    }
+  }
+
+  hitEnemy(e: Enemy, damage: number, opts: { source: HitSource; tag?: string; bounced?: boolean; angle?: number }): void {
+    if (!e.alive || e.invulnerable || e.passive || damage <= 0) return;
+    const wasFrozen = e.frozen;
+    let dmg = damage;
+    let shatter = false;
+    if (wasFrozen && opts.source !== 'poison') {
+      if (e.boss) {
+        dmg *= ENEMIES.bossShatterMult;
+        e.unfreeze();
+        this.fx.burst('ice', e.x, e.y, 10);
+        this.sfx('shatter');
+      } else {
+        shatter = true;
+        dmg = Math.max(dmg, e.hp);
+      }
+    }
+    e.hp -= dmg;
+    e.flashHit();
+    if (opts.angle !== undefined) e.knock(opts.angle, this.stats().knockback);
+    if (opts.source !== 'rick' && opts.source !== 'hazard') this.addRickMeter(dmg);
+    const killed = e.hp <= 0;
+    const info: HitInfo = { source: opts.source, damage: dmg, tag: opts.tag, wasFrozen, killed, bounced: opts.bounced };
+    runHook(this.sources(), 'onHit', this.ctx, e, info);
+    if (!killed && e.alive && opts.source === 'shot') {
+      const st = this.stats();
+      const rng = this.run.play;
+      if (st.freezeChance > 0 && rng.chance(st.freezeChance)) e.freeze(2.5);
+      if (st.poisonChance > 0 && rng.chance(st.poisonChance)) e.poison(3, 3);
+      if (st.slowChance > 0 && rng.chance(st.slowChance)) e.slow(0.6, 2);
+    }
+    if (killed && e.alive) this.killEnemy(e, info, shatter);
+    else if (!killed) this.sfx('hit');
+  }
+
+  private killEnemy(e: Enemy, info: HitInfo, shatter: boolean): void {
+    const x = e.x;
+    const y = e.y;
+    e.alive = false;
+    if (shatter) {
+      this.fx.burst('ice', x, y);
+      this.sfx('shatter');
+      this.fx.floatText(x, y - 30, 'SHATTER!', '#bfeaff', 18);
+    } else {
+      this.fx.burst((e.def.deathFx as BurstStyle | undefined) ?? 'death', x, y);
+      this.sfx('enemy-die');
+    }
+    const run = this.run;
+    run.stats.kills++;
+    if (!e.boss) {
+      const n = e.elite ? run.play.int(ENEMIES.eliteScrap[0], ENEMIES.eliteScrap[1]) : run.play.chance(e.def.scrapChance ?? ENEMIES.scrapChance) ? 1 : 0;
+      for (let i = 0; i < n; i++) this.spawnPickupAt('scrap', x, y, true);
+    }
+    runHook(this.sources(), 'onKill', this.ctx, e, info);
+    e.def.onDeath?.(e.api);
+    this.enemies = this.enemies.filter((o) => o !== e);
+    const wasBoss = e === this.bossEnemy;
+    e.remove();
+    if (wasBoss) this.onBossKilled(e, { x, y });
+  }
+
+  private explode(spec: ExplosionSpec): void {
+    this.fx.burst('fire', spec.x, spec.y);
+    this.fx.burst('smoke', spec.x, spec.y);
+    this.sfx('explosion');
+    this.fx.shake(14, 320);
+    this.fx.flash(spec.color ?? 0xffa94d, 120);
+    const ring = this.add.circle(spec.x, spec.y, spec.radius, spec.color ?? 0xffa94d, 0.25).setDepth(4400).setStrokeStyle(6, 0xfff1c9, 0.9);
+    ring.setScale(0.2);
+    this.tweens.add({ targets: ring, scale: 1, alpha: 0, duration: 380, onComplete: () => ring.destroy() });
+    for (const e of [...this.enemies]) {
+      if (!e.alive || e.passive) continue;
+      const d = Math.hypot(e.x - spec.x, e.y - spec.y);
+      if (d > spec.radius + e.radius) continue;
+      this.hitEnemy(e, spec.damage, { source: 'explosion', tag: spec.tag, angle: Math.atan2(e.y - spec.y, e.x - spec.x) });
+    }
+    const p = this.player;
+    if (spec.playerDamage && Math.hypot(p.x - spec.x, p.y - spec.y) < spec.radius + p.radius) {
+      this.damagePlayer(spec.playerDamage, 'his own bomb', { ignoreInvulnerability: true });
+    }
+  }
+
+  private addRickMeter(amount: number): void {
+    const run = this.run;
+    const before = run.rickMeter;
+    run.rickMeter = Math.min(RICK_METER.max, before + amount * this.stats().rickMeterGain);
+    if (before < RICK_METER.max && run.rickMeter >= RICK_METER.max && !this.meterAnnounced) {
+      this.meterAnnounced = true;
+      this.hud.toast('Rick Meter full! Press Q', { color: 0x97ce4c });
+      this.sfx('portal');
+    }
+  }
+
+  private callRick(): void {
+    const run = this.run;
+    if (this.rickBusy || !this.roomView) return;
+    if (run.rickMeter < RICK_METER.max) {
+      this.sfx('ui-deny');
+      return;
+    }
+    const hostile = this.enemies.filter((e) => e.alive && !e.passive);
+    if (!hostile.length) {
+      this.hud.toast("Rick won't show up with nothing to shoot.");
+      this.sfx('ui-deny');
+      return;
+    }
+    const act = run.act;
+    const gadget = this.reg.gadgets.get(act.rick.gadget);
+    if (!gadget) return;
+    run.rickMeter = 0;
+    this.meterAnnounced = false;
+    this.rickBusy = true;
+    const view = this.roomView;
+    const p = this.player;
+    const side = p.x > view.widthPx / 2 ? -1 : 1;
+    const target = { x: Phaser.Math.Clamp(p.x + side * 80, TILE * 1.5, view.widthPx - TILE * 1.5), y: Phaser.Math.Clamp(p.y, TILE * 1.5, view.heightPx - TILE * 1.5) };
+    const portal = act.rick.entrance === 'portal';
+    let start = target;
+    if (!portal) {
+      const door = [...view.doors].sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+      start = door ? { x: door.x, y: door.y } : { x: side < 0 ? TILE : view.widthPx - TILE, y: target.y };
+    }
+    const rick = this.add.image(start.x, start.y, 'rick').setDepth(target.y + 1).setOrigin(0.5, 0.85);
+    this.actors.set('rick', () => ({ x: rick.x, y: rick.y - 64 }));
+    let swirl: Phaser.GameObjects.Image | null = null;
+    if (portal) {
+      swirl = this.add.image(target.x, target.y - 20, 'exit-portal').setDepth(target.y).setScale(0.1);
+      this.tweens.add({ targets: swirl, scale: 0.8, duration: 180 });
+      rick.setScale(0.2);
+      this.sfx('portal');
+    }
+    this.tweens.add({
+      targets: rick,
+      x: target.x,
+      y: target.y,
+      scale: 1,
+      duration: portal ? 220 : 360,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        const beams = this.add.graphics().setDepth(5000);
+        beams.lineStyle(7, 0xbfeaff, 0.95);
+        for (const e of hostile) if (e.alive) beams.lineBetween(rick.x + side * 18, rick.y - 36, e.x, e.y);
+        beams.lineStyle(3, 0xffffff, 1);
+        for (const e of hostile) if (e.alive) beams.lineBetween(rick.x + side * 18, rick.y - 36, e.x, e.y);
+        this.tweens.add({ targets: beams, alpha: 0, duration: 420, onComplete: () => beams.destroy() });
+        gadget.activate(this.ctx);
+        this.say('rick', run.play.pick(gadget.lines), 2.6);
+        this.time.delayedCall(800, () => this.sfx('burp'));
+        this.time.delayedCall(1500, () => {
+          this.tweens.add({
+            targets: rick,
+            x: start.x,
+            y: start.y,
+            scale: portal ? 0.1 : 1,
+            duration: 300,
+            onComplete: () => {
+              rick.destroy();
+              swirl?.destroy();
+              this.actors.delete('rick');
+              this.rickBusy = false;
+            },
+          });
+        });
+      },
+    });
+  }
+
+  // ---- items and pickups -----------------------------------------------------------------------
+
+  giveItem(id: ContentId, silent = false): void {
+    const item = this.reg.items.get(id);
+    if (!item) return;
+    const inv = this.run.inventory;
+    const before = new Set(activeSynergies(inv.owned(), this.reg.synergies).map((s) => s.id));
+    const res = inv.add(item);
+    if (!res.added) {
+      this.hud.toast(`You already have ${item.name}.`);
+      return;
+    }
+    if (res.dropped) {
+      const at = this.openSpotNear(this.player.x + TILE, this.player.y);
+      this.placeWare({ itemId: res.dropped, x: at.x, y: at.y });
+    }
+    this.run.stats.itemsFound.push(id);
+    this.run.offered.add(id);
+    this.invalidateStats();
+    if (!silent) {
+      const kind = item.kind === 'active' ? 'Active item: right-click or C' : item.kind === 'consumable' ? 'Consumable: press R' : item.kind === 'weapon' ? 'Weapon' : 'Passive';
+      this.hud.itemBanner(item.name, item.blurb, kind);
+      this.sfx('item');
+      this.fx.burst('scrap', this.player.x, this.player.y - 30, 10);
+    }
+    for (const s of activeSynergies(inv.owned(), this.reg.synergies)) {
+      if (!before.has(s.id)) {
+        this.after(silent ? 0 : 1.6, () => this.hud.itemBanner(`Synergy: ${s.name}`, s.blurb, 'Synergy'), false);
+      }
+    }
+  }
+
+  private useActive(): void {
+    const inv = this.run.inventory;
+    if (!inv.active || this.dead || !this.roomView) return;
+    if (!inv.activeReady()) {
+      this.sfx('ui-deny');
+      this.hud.toast('Not charged yet. Clear more rooms.');
+      return;
+    }
+    const def = this.reg.items.get(inv.active.id);
+    if (!def?.active) return;
+    if (def.active.use(this.ctx) === false) {
+      this.sfx('ui-deny');
+      return;
+    }
+    inv.spendActive();
+  }
+
+  private useConsumable(): void {
+    const inv = this.run.inventory;
+    const id = inv.consumable;
+    if (!id || this.dead) return;
+    const def = this.reg.items.get(id);
+    if (!def?.consumable) return;
+    if (def.consumable.use(this.ctx) === false) {
+      this.sfx('ui-deny');
+      return;
+    }
+    inv.takeConsumable();
+    this.hud.toast(`Used ${def.name}`);
+  }
+
+  private applyStatus(id: ContentId): void {
+    const def = this.reg.statuses.get(id);
+    if (!def) return;
+    if (this.run.statuses.add(id)) this.hud.toast(def.name, { color: def.positive ? 0x97ce4c : 0xff8a3d, sub: def.description });
+    this.invalidateStats();
+  }
+
+  private onStatusChanges(changes: StatusChange[]): void {
+    if (!changes.length) return;
+    for (const c of changes) {
+      const applied = c.applied ? this.reg.statuses.get(c.applied) : undefined;
+      if (applied) this.hud.toast(applied.name, { color: applied.positive ? 0x97ce4c : 0xff8a3d, sub: applied.description });
+    }
+    this.invalidateStats();
+  }
+
+  randomItem(filter: ItemFilter = {}): ContentId | null {
+    const run = this.run;
+    const owned = new Set([...run.inventory.owned(), ...(run.inventory.consumable ? [run.inventory.consumable] : []), ...run.offered]);
+    const pool = itemPoolFor(this.reg, run.episode.id, run.act, new Set(svc().save.unlocked), owned, filter);
+    if (!pool.length) return null;
+    const id = run.play.weighted(pool);
+    const item = this.reg.items.get(id);
+    // Consumables can show up again; everything else only once per run.
+    if (item && item.kind !== 'consumable') run.offered.add(id);
+    return id;
+  }
+
+  private placeWare(p: PedestalState): void {
+    const ware: Ware = { item: p.itemId ? this.reg.items.get(p.itemId) : undefined, pickup: p.pickupId ? this.reg.pickups.get(p.pickupId) : undefined };
+    if (!ware.item && !ware.pickup) return;
+    this.objects.spawnPedestal(ware, p.x, p.y, p.price, p.group);
+  }
+
+  private pedestalLabel(p: PedestalObj): string {
+    return p.price !== undefined ? `Buy ${p.name} (${p.price} Scrap)` : `Take ${p.name}`;
+  }
+
+  private takePedestal(p: PedestalObj): void {
+    const run = this.run;
+    if (p.price !== undefined) {
+      if (run.scrap < p.price) {
+        this.sfx('ui-deny');
+        this.hud.toast(`Need ${p.price} Scrap. You have ${run.scrap}.`);
+        return;
+      }
+      if (p.ware.pickup && p.ware.pickup.collect(this.ctx) === false) {
+        this.sfx('ui-deny');
+        this.hud.toast("You don't need that right now.");
+        return;
+      }
+      run.scrap -= p.price;
+      this.sfx('scrap');
+    } else if (p.ware.pickup && p.ware.pickup.collect(this.ctx) === false) {
+      return;
+    }
+    if (p.ware.item) this.giveItem(p.ware.item.id);
+    if (p.group) {
+      for (const o of this.objects.pedestalsInGroup(p.group)) {
+        if (o === p) continue;
+        this.fx.burst('smoke', o.x, o.y - 20, 6);
+        this.objects.removePedestal(o);
+      }
+    }
+    this.objects.removePedestal(p);
+  }
+
+  spawnPickupAt(id: ContentId, x: number, y: number, pop = true): void {
+    const def = this.reg.pickups.get(id);
+    if (!def || !this.roomView) return;
+    const rng = this.run.play;
+    const a = rng.angle();
+    const v = pop ? rng.float(80, 220) : 0;
+    this.objects.spawnPickup(def, x, y, { x: Math.cos(a) * v, y: Math.sin(a) * v });
+  }
+
+  private collectPickup(p: PickupObj): boolean {
+    if (p.def.collect(this.ctx) === false) return false;
+    this.fx.burst(p.def.id === 'scrap' ? 'scrap' : 'heal', p.x, p.y - 8, 5);
+    if (p.def.id !== 'scrap') this.sfx('pickup');
+    return true;
+  }
+
+  private addScrap(n: number, x?: number, y?: number): void {
+    const amount = Math.max(0, Math.round(n));
+    this.run.scrap += amount;
+    this.run.stats.scrapEarned += amount;
+    this.sfx('scrap');
+    if (x !== undefined && y !== undefined) this.fx.floatText(x, y - 20, `+${amount}`, '#ffd54a', 16);
+  }
+
+  private addProp(spec: PropSpec): PropObj {
+    const prop = this.objects.addProp(spec);
+    if (spec.persist) {
+      const list = ((this.roomState.data.__props as PropSpec[] | undefined) ??= []);
+      list.push({ art: spec.art, x: spec.x, y: spec.y, solid: spec.solid, radius: spec.radius, depth: spec.depth });
+    }
+    if (spec.actor) this.actors.set(spec.actor, () => (prop.destroyed ? null : { x: prop.x, y: prop.y - prop.img.displayHeight * prop.img.originY - 6 }));
+    return prop;
+  }
+
+  say(who: ContentId, text: string, seconds = 2.6): void {
+    const ch = this.reg.characters.get(who);
+    const color = ch?.color ?? 0xffd54a;
+    const actor = this.actors.get(who);
+    const pos = actor?.();
+    if (actor && pos) {
+      this.fx.bubble(pos, text, color, seconds, actor, ch?.name);
+      return;
+    }
+    this.fx.bubble(this.screenAnchor(), text, color, seconds, this.screenAnchor, ch?.name ?? who);
+  }
+
+  // ---- script and mechanic APIs ----------------------------------------------------------------
+
+  private makeScriptApi(): RoomScriptApi {
+    const st = this.roomState;
+    const run = this.run;
+    const extra = {
+      room: this.roomInfoObj!,
+      spawnEnemy: (id: ContentId, x: number, y: number, o?: { elite?: boolean; passive?: boolean; delay?: number }): EnemySelf | null =>
+        this.spawnEnemy(id, x, y, { elite: o?.elite, passive: o?.passive, delay: o?.delay }),
+      randomEnemy: () => run.play.weighted(enemyPoolFor(this.reg, run.episode.id, run.act)),
+      spawnPickup: (id: ContentId, x: number, y: number) => this.spawnPickupAt(id, x, y, true),
+      spawnPedestal: (itemId: ContentId, x: number, y: number, o?: { price?: number; choiceGroup?: string }) =>
+        this.placeWare({ itemId, x, y, price: o?.price, group: o?.choiceGroup }),
+      randomItem: (f?: ItemFilter) => this.randomItem(f),
+      addProp: (spec: PropSpec) => this.addProp(spec),
+      enemyCount: () => this.hostileCount(),
+      setHostile: (e: EnemyRef) => this.setHostile(e as Enemy),
+      makeCombat: () => {
+        st.kind = 'combat';
+        st.cleared = false;
+        for (const e of this.enemies) if (e.alive && e.passive) this.setHostile(e);
+      },
+      clearEnemies: () => this.clearEnemiesSilently(),
+      lockDoors: () => {
+        this.scriptLock = true;
+      },
+      unlockDoors: () => {
+        this.scriptLock = false;
+      },
+      completeRoom: () => this.clearRoom(false),
+      completeStage: () => this.completeStage(),
+      endAct: () => this.finishAct(),
+      showChoice: (p: Parameters<HudApi['showChoice']>[0]) => this.hud.showChoice(p),
+      hideChoice: () => this.hud.hideChoice(),
+      playCutscene: (id: ContentId, done?: () => void) => this.playCutscenes([id], done),
+      setObjective: (t: string | null) => {
+        this.objectiveText = t;
+      },
+      setTimer: (s: number | null, label?: string) => {
+        this.hudTimer = s === null ? null : { left: s, label: label ?? '' };
+      },
+      timerLeft: () => this.hudTimer?.left ?? 0,
+      hint: (t: string | null) => {
+        this.hintText = t;
+      },
+      after: (s: number, fn: () => void) => this.after(s, fn, true),
+    };
+    return Object.assign(Object.create(this.ctx) as GameCtx, extra) as RoomScriptApi;
+  }
+
+  private makeMechanicApi(): MechanicApi {
+    const run = this.run;
+    const extra = {
+      room: () => this.roomInfoObj!,
+      here: () => this.scriptApi!,
+      playerTile: () => this.tileUnderPlayer(),
+      hint: (t: string | null) => {
+        this.hintText = t;
+      },
+      playCutscene: (id: ContentId, done?: () => void) => this.playCutscenes([id], done),
+      convertRooms: (from: RoomKind, to: RoomKind) => {
+        run.rooms.forEach((r) => {
+          if (r.kind === from && !r.visited) {
+            r.kind = to;
+            r.cleared = !(to === 'combat' || to === 'special' || to === 'finale');
+          }
+        });
+      },
+      setWeapon: (id: ContentId) => this.giveItem(id),
+    };
+    return Object.assign(Object.create(this.ctx) as GameCtx, extra) as MechanicApi;
+  }
+
+  // ---- HUD model -------------------------------------------------------------------------------
+
+  hudModel(): HudModel {
+    const run = this.run;
+    const inv = run.inventory;
+    const items = this.reg.items;
+    const act = run.act;
+    const floor = run.floor;
+    const gadget = this.reg.gadgets.get(act.rick.gadget);
+    return {
+      hp: run.hp,
+      maxHp: this.maxHp(),
+      rick: { value: run.rickMeter / RICK_METER.max, ready: run.rickMeter >= RICK_METER.max, gadget: gadget?.name ?? 'Rick' },
+      active: inv.active ? { id: inv.active.id, name: items.get(inv.active.id)?.name ?? inv.active.id, charge: inv.active.charge, max: inv.active.max } : null,
+      consumable: inv.consumable ? { id: inv.consumable, name: items.get(inv.consumable)?.name ?? inv.consumable } : null,
+      weapon: { id: inv.weapon, name: items.get(inv.weapon)?.name ?? inv.weapon },
+      passives: inv.passives.map((id) => ({ id, name: items.get(id)?.name ?? id })),
+      scrap: run.scrap,
+      statuses: run.statuses.list().map((s) => ({ id: s.def.id, name: s.def.name, positive: s.def.positive, remaining: s.remaining, kind: s.def.duration.kind })),
+      actName: act.name,
+      actNumber: run.actIndex + 1,
+      actCount: run.sequence.length,
+      widgets: this.mechanics.map((m) => m.inst.hud?.() ?? null).filter((w): w is NonNullable<typeof w> => !!w),
+      boss: this.bossEnemy?.alive ? { title: this.bossEnemy.def.boss?.title ?? this.bossEnemy.def.name, hp: Math.max(0, this.bossEnemy.hp), maxHp: this.bossEnemy.maxHp } : null,
+      objective: this.objectiveText,
+      timer: this.hudTimer ? { ...this.hudTimer } : null,
+      hint: this.hintText,
+      seed: run.seed,
+      time: run.time,
+      map: floor
+        ? {
+            rooms: floor.rooms.map((r) => {
+              const st = run.rooms[r.id];
+              return { id: r.id, x: r.x, y: r.y, kind: st.kind, visited: st.visited, seen: st.seen, cleared: st.cleared, current: r.id === run.currentRoom && run.stage <= 0 };
+            }),
+            gridW: floor.gridW,
+            gridH: floor.gridH,
+            inAnnex: run.stage > 0,
+          }
+        : null,
+      mechanicHelp: this.mechanics.map((m) => `${m.def.name}: ${m.def.help}`),
+    };
+  }
+
+  // ---- debug helpers (?debug=1) ----------------------------------------------------------------
+
+  debugKillAll(): void {
+    for (const e of [...this.enemies]) if (e.alive && !e.passive) this.hitEnemy(e, 99999, { source: 'rick' });
+  }
+
+  debugGotoRoom(id: number): void {
+    if (!this.run.floor?.rooms[id]) return;
+    this.transitionTo(() => this.enterRoom(id));
+  }
+
+  debugGotoAct(index: number): void {
+    if (index < 0 || index >= this.run.sequence.length) return;
+    this.startAct(index);
+  }
+
+  debugFinishStage(): void {
+    if (this.run.stage < 0) {
+      const f = this.run.floor?.finaleId;
+      if (f !== null && f !== undefined) this.debugGotoRoom(f);
+      return;
+    }
+    this.clearEnemiesSilently();
+    this.bossEnemy = null;
+    this.hud.hideChoice();
+    this.completeStage();
+  }
+
+  debugRevealMap(): void {
+    this.run.rooms.forEach((r) => (r.seen = true));
+  }
+
+  debugSpawnEnemy(id: ContentId, elite = false): void {
+    const at = this.roomInfoObj?.randomFloorPoint(this.run.play, 150);
+    if (at) this.spawnEnemy(id, at.x, at.y, { elite });
+  }
+
+  debugAddMeter(): void {
+    this.addRickMeter(RICK_METER.max);
+  }
+
+  debugState(): Record<string, unknown> {
+    return {
+      act: this.run.act.id,
+      actIndex: this.run.actIndex,
+      room: this.run.currentRoom,
+      stage: this.run.stage,
+      kind: this.roomState?.kind,
+      cleared: this.roomState?.cleared,
+      hp: this.run.hp,
+      scrap: this.run.scrap,
+      enemies: this.hostileCount(),
+      shots: this.playerShots.count() + this.enemyShots.count(),
+      ended: this.ended,
+      dead: this.dead,
+      transitioning: this.transitioning,
+      flags: { ...this.run.flags },
+    };
+  }
+
+  debugUseExit(): void {
+    if (this.exitProp) this.useExit();
+  }
+
+  debugSpawnShots(n: number): void {
+    const p = this.player;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      this.enemyShot({ x: p.x + Math.cos(a) * 300, y: p.y + Math.sin(a) * 200, angle: a + Math.PI / 2, speed: 60, kind: 'orb', life: 20 }, 'stress test');
+    }
+  }
+}
