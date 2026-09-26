@@ -37,7 +37,15 @@ export const EPILOGUE_QUESTIONS: QuizQuestion[] = [
 export const LINES = {
   rick: {
     wakeUp: 'Morty! Get up, Morty! I gotta —*urrp*— show you something!',
-    targetPractice: "Target practice, Morty! Shoot the junk drones. Don't ask why they fly.",
+    /** The prologue's weapon beat: why Morty is throwing garage junk. */
+    targetPractice: "Target practice, Morty! Throw stuff at the drones! Wrenches, cans, whatever's lying around!",
+    /** 35-C's weapon beat: Rick tosses over his spare gun. */
+    spareGun: "Here, catch! The critters here bite, Morty. Point the green end at 'em.",
+    /** Customs' weapon beat, after the cover is blown (canon). */
+    takeMyGun: "Here, Morty, take my gun! And shoot the robots!",
+    /** Walking into the gym to deal with a dazed Frank. */
+    frankChill: "Hey, Frank. Chill out. —*urrp*— Literally.",
+    frankThaw: "Relax, Morty. He'll thaw. Probably. C'mon, we're leaving.",
     getInTheCar: "Great. Get in the car, Morty. We're going for a ride.",
     /** Muttered in his sleep while the bomb ticks. */
     sleeping: ['Zzz...', '*snore*', '*urrp*... zzz', 'Five more minutes, Morty... zzz'],
@@ -58,6 +66,9 @@ export const LINES = {
   },
   morty: {
     groveSpotted: 'Whoa. A little island with something on it. Shoes on, I guess.',
+    /** School's weapon beat: no guns at school. */
+    gymBag: "No guns at school. Good thing my gym bag's full of dodgeballs.",
+    frankFrozen: "Rick! You can't just freeze people at school!",
   },
   beth: {
     quizRight: "Morty! That's amazing!",
@@ -74,6 +85,7 @@ export const LINES = {
     intro: 'Hey, Smith! Did you just call me poor?!',
     phase2: "Oh, you think you're funny? Everybody watch this!",
     enraged: "That's it! You're DEAD, Smith!",
+    dazed: 'Ugh... my head... so many... dodgeballs...',
     lockers: ['Locker check!', 'Hit the books, Smith!', "Here's your homework!"],
   },
   supervisor: {

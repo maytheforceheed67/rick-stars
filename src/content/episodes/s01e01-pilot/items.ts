@@ -180,19 +180,6 @@ export const PILOT_ITEMS: ItemDef[] = [
       dot(g, 25, 23, 2.5, PORTAL_GREEN);
     },
   },
-  {
-    id: 'ricks-ray-gun',
-    name: "Rick's Ray Gun",
-    blurb: "Rick's actual gun. For shooting robots. They're definitely robots.",
-    firstAppears: S01E01,
-    canon: true,
-    kind: 'weapon',
-    rarity: 'story',
-    price: 0,
-    noPool: true,
-    weapon: { damageMult: 1.5, fireRateMult: 1.1, extraProjectiles: 0, spread: 0.06, color: 0xff7ae3 },
-    icon: (g) => gunIcon(g, 0xdfe6ee, 0xff7ae3),
-  },
 
   // ---- invented for this game -------------------------------------------------------------------
   {

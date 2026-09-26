@@ -42,8 +42,15 @@ export function runHook<K extends keyof ItemHooks>(sources: readonly HookSource[
 export function weaponModifiers(w: WeaponSpec | undefined): StatModifiers | undefined {
   if (!w) return undefined;
   return {
-    add: { projectiles: w.extraProjectiles, spread: w.spread },
-    mult: { damage: w.damageMult, fireRate: w.fireRateMult },
+    add: { projectiles: w.extraProjectiles, spread: w.spread, bounces: w.bounces ?? 0 },
+    mult: {
+      damage: w.damageMult,
+      fireRate: w.fireRateMult,
+      shotSize: w.sizeMult ?? 1,
+      shotSpeed: w.speedMult ?? 1,
+      range: w.rangeMult ?? 1,
+      knockback: w.knockbackMult ?? 1,
+    },
   };
 }
 

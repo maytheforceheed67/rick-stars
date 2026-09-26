@@ -49,7 +49,7 @@ export const suspicion: MechanicDef = {
       api.hint(null);
       api.playCutscene('pilot-cover-blown', () => {
         api.flags.coverBlown = true;
-        api.setWeapon('ricks-ray-gun');
+        api.giveActWeapon();
         const here = api.here();
         here.makeCombat();
         here.setObjective(null);

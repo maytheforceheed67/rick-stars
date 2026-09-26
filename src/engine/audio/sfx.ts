@@ -137,6 +137,11 @@ export const SFX: Record<string, SfxRecipe> = {
   ],
   slash: [{ wave: 'noise', freq: 3000, duration: 0.12, volume: 0.22, filter: { type: 'bandpass', freq: 3500, freqEnd: 1200, q: 1.5 } }],
   throw: [{ wave: 'noise', freq: 1000, duration: 0.1, volume: 0.14, filter: { type: 'bandpass', freq: 800, freqEnd: 1600, q: 1 } }],
+  // Morty throwing something: a quick whoosh with a little grunt of effort under it.
+  'throw-light': [
+    { wave: 'noise', freq: 1400, duration: 0.11, volume: 0.16, filter: { type: 'bandpass', freq: 1300, freqEnd: 3200, q: 1.2 } },
+    { wave: 'triangle', freq: 260, freqEnd: 180, duration: 0.07, volume: 0.08 },
+  ],
   'ui-move': [{ wave: 'square', freq: 700, duration: 0.04, volume: 0.08 }],
   'ui-select': [
     { wave: 'square', freq: 700, duration: 0.05, volume: 0.1 },

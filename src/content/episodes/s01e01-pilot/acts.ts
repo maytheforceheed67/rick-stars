@@ -1,5 +1,6 @@
 /** The Pilot's acts: prologue, three procedural acts, epilogue. */
 import type { ActDef, BiomeDef, Weighted } from '../../../engine/types';
+import { LINES } from './dialogue';
 import { C35_COMBAT, CUSTOMS_COMBAT, CUSTOMS_QUEUES, SCHOOL_COMBAT } from './rooms';
 
 const RICK = { gadget: 'freeze-ray', entrance: 'walk' } as const;
@@ -129,6 +130,8 @@ export const PROLOGUE: ActDef = {
   itemPool: [],
   eliteChance: 0,
   finale: [{ kind: 'encounter', encounter: 'pilot-bomb-defuse' }],
+  // Handed over by the garage script when target practice starts.
+  weapon: { item: 'garage-junk', when: 'scripted', from: 'rick', line: LINES.rick.targetPractice },
   rick: RICK,
   mechanics: [],
   intro: ['pilot-wake-up'],
@@ -173,6 +176,7 @@ export const SCHOOL: ActDef = {
   shop: { keeperArt: 'vending-machine', name: 'Vending Machine', alwaysStocks: ['mystery-meat'] },
   specialRoom: 'pilot-pop-quiz',
   finale: [{ kind: 'boss', boss: 'frank-palicky', template: 'school-boss' }],
+  weapon: { item: 'gym-bag-dodgeballs', when: 'start', from: 'morty', line: LINES.morty.gymBag },
   rick: RICK,
   mechanics: [],
   startStatuses: ['sleep-deprived'],
@@ -218,6 +222,7 @@ export const DIMENSION_35C: ActDef = {
   shop: { keeperArt: 'trader-critter', name: 'Trader Critter', alwaysStocks: ['broken-leg-serum'] },
   specialRoom: 'pilot-mega-grove',
   finale: [{ kind: 'encounter', encounter: 'pilot-big-mega-tree' }],
+  weapon: { item: 'ricks-spare-ray-gun', when: 'start', from: 'rick', line: LINES.rick.spareGun },
   rick: RICK,
   mechanics: ['grappling-shoes'],
   intro: ['pilot-35c-arrival'],
@@ -276,6 +281,8 @@ export const CUSTOMS: ActDef = {
     { kind: 'boss', boss: 'customs-supervisor', template: 'customs-boss' },
     { kind: 'encounter', encounter: 'pilot-customs-escape' },
   ],
+  // Canon: Rick hands over his own gun when their cover is blown (the suspicion mechanic).
+  weapon: { item: 'ricks-ray-gun', when: 'scripted', from: 'rick', line: LINES.rick.takeMyGun },
   rick: RICK,
   mechanics: ['suspicion'],
   intro: ['pilot-customs-intro'],
@@ -294,6 +301,8 @@ export const EPILOGUE: ActDef = {
   itemPool: [],
   eliteChance: 0,
   finale: [{ kind: 'encounter', encounter: 'pilot-epilogue' }],
+  // Home again: Rick took his gun back on the way through the portal.
+  unarmed: true,
   rick: RICK,
   mechanics: [],
 };

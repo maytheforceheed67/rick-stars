@@ -16,6 +16,7 @@ import { grapplingShoes } from './mechanics/grapplingShoes';
 import { suspicion } from './mechanics/suspicion';
 import { PILOT_MUSIC } from './music';
 import { PILOT_TEMPLATES } from './rooms';
+import { PILOT_WEAPON_ART, PILOT_WEAPONS } from './weapons';
 import { PILOT_SPECIAL_ROOMS } from './specialRooms';
 import { PILOT_STATUSES } from './statuses';
 
@@ -41,14 +42,13 @@ export const pilot: EpisodeDef = {
   title: 'Pilot',
   synopsis:
     'Rick drags Morty out of school and into Dimension 35-C for Mega Seeds. Getting them home means smuggling them through Interdimensional Customs.',
-  startWeapon: 'ricks-spare-ray-gun',
   prologue: PROLOGUE,
   acts: [SCHOOL, DIMENSION_35C, CUSTOMS],
   epilogue: EPILOGUE,
   unlocksOnClear: ['mega-seed'],
   content: {
     characters: PILOT_CHARACTERS,
-    items: PILOT_ITEMS,
+    items: [...PILOT_WEAPONS, ...PILOT_ITEMS],
     synergies: PILOT_SYNERGIES,
     statuses: [...PILOT_STATUSES, slimed],
     enemies: [...PILOT_ENEMIES, ...PILOT_BOSSES, ...PILOT_HAZARDS],
@@ -61,7 +61,7 @@ export const pilot: EpisodeDef = {
     backdrops: PILOT_BACKDROPS,
     templates: PILOT_TEMPLATES,
     scripts: PILOT_SCRIPTS,
-    sprites: [...PILOT_PROP_ART, ...PILOT_HAZARD_ART],
+    sprites: [...PILOT_PROP_ART, ...PILOT_HAZARD_ART, ...PILOT_WEAPON_ART],
     music: PILOT_MUSIC,
   },
 };

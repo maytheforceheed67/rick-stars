@@ -24,6 +24,8 @@ export interface ProjectileOpts {
   applies?: string;
   /** Pixel radius the texture was drawn at (used to scale it). */
   baseRadius?: number;
+  /** Halo color, for pools with glow (defaults to the tint). */
+  glow?: number;
 }
 
 export class Projectile {
@@ -76,7 +78,7 @@ export class Projectile {
     else this.img.clearTint();
     this.img.setRotation(this.spin ? 0 : o.angle);
     if (this.glow) {
-      this.glow.setPosition(o.x, o.y).setScale((o.radius * 3.4) / 8).setVisible(true).setTint(o.tint ?? 0xffffff);
+      this.glow.setPosition(o.x, o.y).setScale((o.radius * 3.4) / 8).setVisible(true).setTint(o.glow ?? o.tint ?? 0xffffff);
     }
   }
 

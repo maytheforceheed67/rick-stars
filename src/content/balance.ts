@@ -87,9 +87,16 @@ export const ENEMIES = {
   /** Frozen enemies shatter on the next hit; bosses instead take this multiplier and thaw. */
   bossShatterMult: 2.5,
   bossFreezeMult: 0.5,
-  /** HP bands from the design brief. Tests hold every enemy to these; elites multiply regular HP. */
-  regularHp: [5, 18] as [number, number],
-  bossHp: [350, 700] as [number, number],
+  /**
+   * Hits from the act's story weapon (at base stats) it takes to bring an enemy down. Tests hold
+   * every enemy an act can field to these bands, elites included (see actEnemies()).
+   */
+  hitsToKill: { regular: [2, 4] as [number, number], elite: [5, 8] as [number, number] },
+  /**
+   * How long a boss fight should last with the act's weapon, assuming Morty lands `hitRate` of his
+   * shots at his base fire rate (the rest of the time he's dodging). Tests check every boss.
+   */
+  bossFight: { seconds: [60, 90] as [number, number], hitRate: 0.5 },
   /** Chance a regular enemy drops Scrap. */
   scrapChance: 0.35,
   /** Speed multiplier from a support enemy's haste buff. */

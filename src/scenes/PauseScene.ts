@@ -47,7 +47,7 @@ export class PauseScene extends Phaser.Scene {
     const lines = [
       `Act ${m.actNumber}/${m.actCount}: ${m.actName}`,
       `Time ${formatTime(m.time)}    Seed ${formatSeed(m.seed)}    Scrap ${m.scrap}`,
-      `Weapon: ${m.weapon.name}`,
+      `Weapon: ${m.weapon?.name ?? 'nothing yet'}`,
       `Active: ${m.active ? `${m.active.name} (${m.active.charge}/${m.active.max})` : '-'}    Consumable: ${m.consumable?.name ?? '-'}`,
       `Statuses: ${m.statuses.length ? m.statuses.map((s) => s.name).join(', ') : 'none'}`,
     ];

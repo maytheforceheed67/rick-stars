@@ -76,7 +76,7 @@ export class RunState {
     reg: Registry,
     readonly episode: EpisodeDef,
     readonly seed: string,
-    opts: { skipPrologue: boolean; weapon: ContentId; startHp: number },
+    opts: { skipPrologue: boolean; startHp: number },
   ) {
     this.rng = new Rng(`${episode.id}:${seed}`);
     this.play = this.rng.fork('play');
@@ -85,7 +85,7 @@ export class RunState {
       ...episode.acts,
       ...(episode.epilogue ? [episode.epilogue] : []),
     ];
-    this.inventory = new Inventory(opts.weapon);
+    this.inventory = new Inventory();
     this.statuses = new StatusManager((id) => reg.statuses.get(id));
     this.hp = opts.startHp;
   }

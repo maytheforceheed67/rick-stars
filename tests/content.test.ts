@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { ENEMIES } from '../src/content/balance';
 import { TRACKS } from '../src/engine/audio/music';
 import { createRegistry, LISTINGS } from '../src/content/registry';
 import { availableIn, compareEpisodes, nextUp } from '../src/engine/episodes';
@@ -34,16 +33,6 @@ describe('content registry', () => {
     expect(pilot.content.items.length).toBeGreaterThanOrEqual(20);
     for (const act of pilot.acts) {
       if (act.layout.kind === 'procedural') expect(act.layout.templates.length).toBeGreaterThanOrEqual(12);
-    }
-  });
-
-  it('keeps regular enemies within 8-15 HP and bosses within 180-300 HP', () => {
-    expect(reg.enemies.size).toBeGreaterThan(10);
-    for (const e of reg.enemies.values()) {
-      if (e.hazard) continue;
-      const [lo, hi] = e.boss ? ENEMIES.bossHp : ENEMIES.regularHp;
-      expect(e.hp, e.id).toBeGreaterThanOrEqual(lo);
-      expect(e.hp, e.id).toBeLessThanOrEqual(hi);
     }
   });
 

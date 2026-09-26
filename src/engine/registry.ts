@@ -158,6 +158,23 @@ export function buildRegistry(listings: EpisodeListing[], shared: EpisodeContent
   return reg;
 }
 
+/**
+ * Every enemy an act can put in front of Morty: its pool, its bosses, and whatever those bring
+ * into the room (EnemyDef.spawns). Missing ids are skipped here; validation reports them.
+ */
+export function actEnemies(reg: Pick<Registry, 'enemies'>, act: ActDef): EnemyDef[] {
+  const out = new Map<ContentId, EnemyDef>();
+  const visit = (id: ContentId) => {
+    const e = reg.enemies.get(id);
+    if (!e || out.has(id)) return;
+    out.set(id, e);
+    e.spawns?.forEach(visit);
+  };
+  act.enemyPool.forEach((w) => visit(w.id));
+  for (const f of act.finale) if (f.kind === 'boss') visit(f.boss);
+  return [...out.values()];
+}
+
 /** Every act an episode can play, in order. */
 export function episodeActs(ep: EpisodeDef): ActDef[] {
   return [...(ep.prologue ? [ep.prologue] : []), ...ep.acts, ...(ep.epilogue ? [ep.epilogue] : [])];
@@ -219,6 +236,7 @@ export function validateRegistry(reg: Registry): string[] {
         if (e?.hazard) err(`${where}: "${w.id}" is a hazard; list it under hazards, not the enemy pool`);
         if (!(w.weight > 0)) err(`${where}: enemy "${w.id}" needs a positive weight`);
       }
+      for (const e of actEnemies(reg, act)) gate(reg.enemies, e.id, 'enemy', where);
       for (const w of act.hazards ?? []) {
         const h = gate(reg.enemies, w.id, 'hazard', where);
         if (h && !h.hazard) err(`${where}: "${w.id}" is listed as a hazard but isn't one`);
@@ -228,6 +246,17 @@ export function validateRegistry(reg: Registry): string[] {
         const item = gate(reg.items, w.id, 'item', where);
         if (item?.noPool) err(`${where}: story item "${w.id}" can't be in a random pool`);
         if (!(w.weight > 0)) err(`${where}: item "${w.id}" needs a positive weight`);
+      }
+      // Every weapon needs a story reason the player sees (docs/ADDING_AN_EPISODE.md).
+      const fights = act.enemyPool.length > 0 || act.finale.some((f) => f.kind === 'boss');
+      if (act.weapon) {
+        const w = gate(reg.items, act.weapon.item, 'weapon', where);
+        if (w && w.kind !== 'weapon') err(`${where}: story weapon "${act.weapon.item}" isn't a weapon`);
+        gate(reg.characters, act.weapon.from, 'character', where);
+        if (!act.weapon.line.trim()) err(`${where}: story weapon "${act.weapon.item}" needs a line saying where it comes from`);
+        if (act.unarmed) err(`${where}: an unarmed act can't hand out a weapon`);
+      } else if (fights && !act.unarmed) {
+        err(`${where}: has enemies but no story weapon (ActDef.weapon)`);
       }
       for (const id of act.mechanics) gate(reg.mechanics, id, 'mechanic', where);
       for (const id of act.startStatuses ?? []) gate(reg.statuses, id, 'status', where);
@@ -246,6 +275,7 @@ export function validateRegistry(reg: Registry): string[] {
           const boss = gate(reg.enemies, stage.boss, 'boss', where);
           if (boss && !boss.boss) err(`${where}: "${stage.boss}" is an enemy, not a boss`);
           if (boss?.boss?.defeatCutscene) gate(reg.cutscenes, boss.boss.defeatCutscene, 'cutscene', where);
+          if (boss?.boss?.character) gate(reg.characters, boss.boss.character, 'character', where);
           if (boss?.boss?.reward) gate(reg.items, boss.boss.reward, 'item', where);
           if (boss?.boss?.music && !reg.music.has(boss.boss.music)) err(`${where}: boss music "${boss.boss.music}" doesn't exist`);
           checkTemplateId(stage.template, `${where} finale`, doors);
@@ -314,6 +344,7 @@ export function validateRegistry(reg: Registry): string[] {
   }
   for (const e of reg.enemies.values()) {
     if (!(e.hp > 0) || !(e.radius > 0)) err(`enemy "${e.id}" needs positive hp and radius`);
+    for (const id of e.spawns ?? []) if (!reg.enemies.has(id)) err(`enemy "${e.id}" spawns missing enemy "${id}"`);
   }
   for (const p of reg.pickups.values()) if (!reg.sprites.has(p.art)) err(`pickup "${p.id}" art "${p.art}" doesn't exist`);
   for (const sr of reg.specialRooms.values()) {

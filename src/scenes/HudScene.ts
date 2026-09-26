@@ -82,17 +82,20 @@ export class HudScene extends Phaser.Scene implements HudApi {
 
     this.texts.rick = this.add.text(196, 8, 'RICK METER', textStyle(12, '#cfe9b0')).setOrigin(0, 0);
     this.texts.rickKey = this.add.text(386, 30, 'Q', textStyle(18, '#97ce4c')).setOrigin(0, 0.5);
-    this.texts.activeKey = this.add.text(434, 58, 'C', textStyle(11, '#b8b0c8')).setOrigin(0.5, 1);
-    this.texts.consKey = this.add.text(492, 58, 'R', textStyle(11, '#b8b0c8')).setOrigin(0.5, 1);
-    this.icons.active = this.add.image(434, 28, '__WHITE').setVisible(false);
-    this.icons.cons = this.add.image(492, 28, '__WHITE').setVisible(false);
-    this.icons.scrap = this.add.image(538, 30, 'ui-scrap');
-    this.texts.scrap = this.add.text(556, 30, '0', textStyle(20, '#ffd54a')).setOrigin(0, 0.5);
+    this.texts.weaponKey = this.add.text(434, 58, 'FIRE', textStyle(10, '#b8b0c8')).setOrigin(0.5, 1);
+    this.texts.activeKey = this.add.text(492, 58, 'C', textStyle(11, '#b8b0c8')).setOrigin(0.5, 1);
+    this.texts.consKey = this.add.text(550, 58, 'R', textStyle(11, '#b8b0c8')).setOrigin(0.5, 1);
+    this.icons.weapon = this.add.image(434, 28, '__WHITE').setVisible(false);
+    this.icons.active = this.add.image(492, 28, '__WHITE').setVisible(false);
+    this.icons.cons = this.add.image(550, 28, '__WHITE').setVisible(false);
+    this.icons.scrap = this.add.image(598, 30, 'ui-scrap');
+    this.texts.scrap = this.add.text(616, 30, '0', textStyle(20, '#ffd54a')).setOrigin(0, 0.5);
     this.texts.act = this.add.text(GAME_WIDTH - 14, 14, '', textStyle(15, '#ffffff')).setOrigin(1, 0);
     this.texts.clock = this.add.text(GAME_WIDTH - 14, 36, '', textStyle(12, '#b8b0c8')).setOrigin(1, 0);
     this.texts.objective = this.add.text(16, HUD_HEIGHT + 10, '', textStyle(15, '#ffe27a')).setOrigin(0, 0);
     this.texts.timer = this.add.text(GAME_WIDTH / 2, HUD_HEIGHT + 8, '', displayStyle(34, '#ffffff')).setOrigin(0.5, 0);
     this.texts.hint = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 70, '', textStyle(18, '#ffffff', { align: 'center' })).setOrigin(0.5, 1);
+    this.texts.skip = this.add.text(GAME_WIDTH - 16, GAME_HEIGHT - 14, 'Space: skip', textStyle(14, '#b8b0c8')).setOrigin(1, 1).setVisible(false);
     this.texts.bossTitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 42, '', textStyle(16, '#ffffff')).setOrigin(0.5, 1);
     this.texts.mapTitle = this.add.text(GAME_WIDTH / 2, 110, '', displayStyle(30, '#ffffff')).setOrigin(0.5).setVisible(false);
     this.texts.mapHelp = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 60, '', textStyle(15, '#b8b0c8', { align: 'center' })).setOrigin(0.5).setVisible(false);
@@ -129,6 +132,7 @@ export class HudScene extends Phaser.Scene implements HudApi {
     this.texts.timer.setText(m.timer ? `${m.timer.label} ${Math.ceil(m.timer.left)}` : '');
     this.texts.timer.setColor(m.timer && m.timer.left <= 5 ? '#ff6a5a' : '#ffffff');
     this.texts.hint.setText(m.hint ?? '');
+    this.texts.skip.setVisible(m.scene);
     this.drawMap(m);
     this.updateToasts(dt);
     this.updateChoice(dt);
@@ -179,8 +183,11 @@ export class HudScene extends Phaser.Scene implements HudApi {
       g.lineStyle(2, on ? 0xf4efe6 : 0x5a5070, 1);
       g.strokeRoundedRect(x - 22, 6, 44, 44, 8);
     };
-    box(434, !!m.active);
-    box(492, !!m.consumable);
+    box(434, !!m.weapon);
+    box(492, !!m.active);
+    box(550, !!m.consumable);
+    if (m.weapon) this.icons.weapon.setTexture(`icon-${m.weapon.id}`).setVisible(true);
+    else this.icons.weapon.setVisible(false);
     if (m.active) {
       this.icons.active.setTexture(`icon-${m.active.id}`).setVisible(true);
       const ready = m.active.charge >= m.active.max;
@@ -188,11 +195,11 @@ export class HudScene extends Phaser.Scene implements HudApi {
       const pips = m.active.max;
       for (let i = 0; i < pips; i++) {
         g.fillStyle(i < m.active.charge ? COLORS.portal : 0x3a3150, 1);
-        g.fillRect(414 + (i * 40) / pips, 44, Math.max(2, 40 / pips - 2), 4);
+        g.fillRect(472 + (i * 40) / pips, 44, Math.max(2, 40 / pips - 2), 4);
       }
       if (ready) {
         g.lineStyle(3, COLORS.portal, 0.6 + 0.4 * Math.sin(this.t * 6));
-        g.strokeRoundedRect(412, 6, 44, 44, 8);
+        g.strokeRoundedRect(470, 6, 44, 44, 8);
       }
     } else this.icons.active.setVisible(false);
     if (m.consumable) this.icons.cons.setTexture(`icon-${m.consumable.id}`).setVisible(true);
@@ -213,7 +220,7 @@ export class HudScene extends Phaser.Scene implements HudApi {
         txt.setVisible(false);
         return;
       }
-      const x = 640 + i * 44;
+      const x = 700 + i * 44;
       icon.setVisible(true).setTexture(`status-${s.id}`).setPosition(x, 24);
       const label = s.kind === 'seconds' ? `${Math.ceil(s.remaining)}s` : s.kind === 'rooms' ? `${Math.ceil(s.remaining)} rm` : '';
       txt.setVisible(true).setText(label).setPosition(x, 40).setColor(s.positive ? '#b6f07a' : '#ffb38a');

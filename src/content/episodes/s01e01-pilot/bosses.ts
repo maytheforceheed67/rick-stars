@@ -105,10 +105,37 @@ export const frankBoss: EnemyDef = {
   art: ART.frank,
   boss: {
     title: 'Frank Palicky',
+    character: 'frank',
+    objective: "Pelt Frank with dodgeballs until he's dazed",
     phases: [...FRANK.phases],
-    defeatCutscene: 'pilot-frank-frozen',
     reward: 'franks-switchblade',
-    onDefeat: (api, at) => api.addProp({ art: 'frank-frozen', x: at.x, y: at.y + 20, solid: true, radius: 22, persist: true }),
+    // Like the show: Morty can't beat Frank on his own. He wears him out with dodgeballs, then
+    // Rick strolls into the gym and freezes him solid.
+    dazed: (api, frank, done) => {
+      const at = { x: frank.x, y: frank.y };
+      const side = at.x > api.room.widthPx / 2 ? -1 : 1;
+      api.actScene(
+        [
+          { kind: 'say', who: 'frank', text: LINES.frank.dazed, seconds: 1.8 },
+          // Below and to the side, clear of where the reward and the way out appear.
+          { kind: 'enter', who: 'rick', via: 'door', to: { x: at.x + side * 100, y: at.y + 120 } },
+          { kind: 'face', who: 'rick', toward: at },
+          { kind: 'say', who: 'rick', text: LINES.rick.frankChill },
+          { kind: 'beam', who: 'rick', to: at, color: 0xbfeaff, sfx: 'freeze-ray' },
+          {
+            kind: 'do',
+            fn: () => {
+              frank.setAlpha(0);
+              api.addProp({ art: 'frank-frozen', x: at.x, y: at.y + 20, solid: true, radius: 22, persist: true });
+            },
+          },
+          { kind: 'face', who: 'morty', toward: { near: 'rick', gap: 0 } },
+          { kind: 'say', who: 'morty', text: LINES.morty.frankFrozen },
+          { kind: 'say', who: 'rick', text: LINES.rick.frankThaw },
+        ],
+        done,
+      );
+    },
   },
   brain: function* (api: EnemyApi): Brain {
     const self = api.self;
@@ -210,6 +237,7 @@ function* supervisorBarrage(api: EnemyApi, windupMult: number): Brain {
 
 export const supervisorBoss: EnemyDef = {
   id: 'customs-supervisor',
+  spawns: ['gromflomite-clerk', 'gromflomite-guard'],
   name: 'Customs Supervisor',
   firstAppears: S01E01,
   canon: false,

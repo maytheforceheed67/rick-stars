@@ -59,11 +59,11 @@ Menus work with the mouse, or with W/S or the arrow keys plus Enter, Space or E.
 
 | Part | What happens |
 |---|---|
-| **Prologue: "Just a Test"** | A tutorial in Morty's bedroom and the garage, with junk target drones. Then the flight cutscene, and defusing the neutrino bomb from Rick's sleep-mumbled instructions before the timer runs out. |
-| **Act 1: Harry Herpson High** | Morty starts Sleep-Deprived. Enemies are pop quizzes, hall monitors, dodgeball jocks and cafeteria slop. There's Goldenfold's Pop Quiz room, a vending-machine shop, and Frank Palicky as the boss. |
-| **Act 2: Dimension 35-C** | The grappling shoes, starting with the scripted fall and the Broken Leg Serum trip. Four invented critters, a Mega Tree grove, a trader critter, and the Big Mega Tree finale, where Morty harvests three Mega Fruit. |
-| **Act 3: Interdimensional Customs** | Suspicion: sneak through 3–4 queue rooms past agents and scanners until the checkpoint blows your cover. Then comes Rick's ray gun, "ROBOT" nameplates, the Confiscated Goods vault, an overpriced Duty-Free and the Customs Supervisor, followed by a 40-second sprint to the portal home. |
-| **Epilogue: "Temporarily a Genius"** | Rick's quiz, where the right answers glow. Then the side effects kick in while Rick rambles. |
+| **Prologue: "Just a Test"** | A tutorial in Morty's bedroom and the garage, where Rick yells at him to throw garage junk at the target drones. Then the flight cutscene, and defusing the neutrino bomb from Rick's sleep-mumbled instructions before the timer runs out. |
+| **Act 1: Harry Herpson High** | No guns at school: Morty fights with dodgeballs from his gym bag, and starts Sleep-Deprived. Enemies are pop quizzes, hall monitors, dodgeball jocks and cafeteria slop. There's Goldenfold's Pop Quiz room and a vending-machine shop. Morty can't beat Frank Palicky on his own: he pelts him until he's dazed, then Rick walks into the gym and freezes him. |
+| **Act 2: Dimension 35-C** | Rick tosses Morty his spare ray gun, because the critters bite. The grappling shoes, starting with the scripted fall and the Broken Leg Serum trip. Invented critters, a Mega Tree grove, a trader critter, and the Big Mega Tree finale, where Morty harvests three Mega Fruit. |
+| **Act 3: Interdimensional Customs** | Suspicion: sneak through 3–4 queue rooms past agents and scanners until the checkpoint blows your cover. Then Rick hands over his own ray gun, agents get "ROBOT" nameplates, and there's the Confiscated Goods vault, an overpriced Duty-Free and the Customs Supervisor, followed by a 40-second sprint to the portal home. |
+| **Epilogue: "Temporarily a Genius"** | Home, with Rick's gun back in his pocket. Rick's quiz, where the right answers glow. Then the side effects kick in while Rick rambles. |
 
 There are 27 items and 3 synergies (for example Freeze Ray Mod + Frank's Switchblade). The items are:
 - 6 from the episode;

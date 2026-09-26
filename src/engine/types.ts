@@ -139,7 +139,23 @@ export interface WeaponSpec {
   extraProjectiles: number;
   /** Extra total spread in radians. */
   spread: number;
+  /** Energy shots are tinted this color; it also colors the muzzle flash and the shot's halo. */
   color: number;
+  /** Energy bolts fired from a gun, or things Morty throws (no muzzle flash, drawn untinted). */
+  style?: 'energy' | 'thrown';
+  /** Shot sprite key, or several to pick from at random (a hail of garage junk). Default 'shot-player'. */
+  shot?: string | readonly string[];
+  /** Degrees per second a thrown shot spins (0 = points along its path). */
+  spin?: number;
+  /** Multiply shot size, speed, range and knockback. */
+  sizeMult?: number;
+  speedMult?: number;
+  rangeMult?: number;
+  knockbackMult?: number;
+  /** Extra wall bounces. */
+  bounces?: number;
+  /** Sound each shot makes (default 'shoot', or 'shoot-heavy' for hard hitters). */
+  sfx?: string;
 }
 
 export interface ItemDef extends ContentMeta {
@@ -465,6 +481,8 @@ export interface EnemyDef extends ContentMeta {
   knockbackResist?: number;
   elite?: { hpMult: number; scale?: number; params?: Record<string, number>; mods?: EliteMod[] };
   onDeath?(api: EnemyApi): void;
+  /** Enemies this one brings into the room (its brood, its backup, what it splits into). */
+  spawns?: ContentId[];
   /** Particle style when it dies ('death', 'paper', 'slime', 'spark', ...). */
   deathFx?: string;
   /** Nameplate text shown above the enemy (e.g. Rick insisting they're robots). */
@@ -483,6 +501,10 @@ export interface EnemyDef extends ContentMeta {
 
 export interface BossInfo {
   title: string;
+  /** The character this boss is, so scenes and ctx.say() can talk from his head. */
+  character?: ContentId;
+  /** Objective line shown during the fight (e.g. "Daze Frank with dodgeballs"). */
+  objective?: string;
   /** Plays when the boss is beaten, before the exit opens. */
   defeatCutscene?: ContentId;
   /** Item pedestal spawned when the boss is beaten. */
@@ -492,6 +514,12 @@ export interface BossInfo {
   music?: string;
   /** HP fractions where the fight changes phase (drawn as ticks on the boss bar). */
   phases?: number[];
+  /**
+   * The boss isn't killed: at 0 HP he's left dazed and harmless, and this plays the ending in the
+   * room (e.g. Rick walks in and freezes him). Call done() when it's over; the rest of the defeat
+   * (onDefeat, the reward and the way out) follows.
+   */
+  dazed?(api: RoomScriptApi, boss: EnemySelf, done: () => void): void;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -603,7 +631,36 @@ export interface RoomScriptApi extends GameCtx {
   timerLeft(): number;
   /** Floating hint text near the bottom of the screen; null hides it. */
   hint(text: string | null): void;
+  /** Hands Morty this act's story weapon (ActDef.weapon), shown on screen with its line. */
+  giveActWeapon(): void;
+  /**
+   * Plays an in-engine scene in this room: characters walk in, talk in speech bubbles and act.
+   * Morty can't move meanwhile, and any key skips ahead. onDone runs when it's over.
+   */
+  actScene(steps: SceneStep[], onDone?: () => void): void;
 }
+
+/** Where a scene character stands or walks to: a spot, or next to another character. */
+export type SceneSpot = Vec | { near: ContentId; side?: -1 | 1; gap?: number };
+
+/**
+ * One beat of an in-engine scene; each waits for the previous one. `who` is a character id; the
+ * act's playable character (Morty) is the player himself.
+ */
+export type SceneStep =
+  /** Walks in through the nearest door, steps out of a portal, or just appears. */
+  | { kind: 'enter'; who: ContentId; via: 'door' | 'portal' | 'here'; to: SceneSpot }
+  | { kind: 'walk'; who: ContentId; to: SceneSpot; speed?: number }
+  /** A speech bubble. Waits about as long as it takes to read unless `seconds` says otherwise. */
+  | { kind: 'say'; who: ContentId; text: string; seconds?: number }
+  | { kind: 'face'; who: ContentId; toward: SceneSpot }
+  | { kind: 'emote'; who: ContentId; emote: 'jump' | 'shake' | 'shock' }
+  /** A ray-gun beam from the character to a spot (the freeze ray). */
+  | { kind: 'beam'; who: ContentId; to: SceneSpot; color: number; sfx?: string }
+  | { kind: 'wait'; seconds: number }
+  /** Runs code at this point (swap a sprite, drop a prop, set a flag). Also runs when skipped. */
+  | { kind: 'do'; fn: () => void }
+  | { kind: 'leave'; who: ContentId; via: 'door' | 'portal' };
 
 /** Script attached to a special room, encounter or fixed room. */
 export interface RoomScript {
@@ -685,7 +742,8 @@ export interface MechanicApi extends GameCtx {
   playCutscene(id: ContentId, onDone?: () => void): void;
   /** Turns unvisited rooms of one kind into another kind (e.g. calm -> combat) for the rest of the act. */
   convertRooms(from: RoomKind, to: RoomKind): void;
-  setWeapon(itemId: ContentId): void;
+  /** Hands Morty this act's story weapon (ActDef.weapon), shown on screen with its line. */
+  giveActWeapon(): void;
 }
 
 export interface MechanicInstance {
@@ -775,6 +833,25 @@ export interface FixedLayout {
   start: { x: number; y: number };
 }
 
+/**
+ * Where Morty's weapon comes from in an act. Every weapon needs a story reason that the player
+ * sees (docs/ADDING_AN_EPISODE.md).
+ */
+export interface StoryWeapon {
+  /** A weapon item (usually rarity 'story', noPool). */
+  item: ContentId;
+  /**
+   * 'start': handed over as the act begins, right after its intro.
+   * 'scripted': a room script or mechanic calls giveActWeapon() at the moment the story says;
+   * until then Morty keeps the previous act's weapon (or has none).
+   */
+  when: 'start' | 'scripted';
+  /** Who hands it over (a character id; the playable character means he finds it himself). */
+  from: ContentId;
+  /** What they say as it happens. */
+  line: string;
+}
+
 export interface ActDef {
   id: string;
   name: string;
@@ -796,6 +873,10 @@ export interface ActDef {
   finale: FinaleStage[];
   rick: { gadget: ContentId; entrance: 'walk' | 'portal' };
   mechanics: ContentId[];
+  /** Where Morty's weapon comes from in this act. Required for any act with enemies. */
+  weapon?: StoryWeapon;
+  /** Morty puts his weapon away for this act (a quiet epilogue at home). */
+  unarmed?: boolean;
   /** Statuses applied when the act starts. */
   startStatuses?: ContentId[];
   intro?: ContentId[];
@@ -843,8 +924,6 @@ export interface EpisodeDef extends ContentMeta {
   title: string;
   /** One-line pitch shown on the Season Map. */
   synopsis: string;
-  /** Weapon the playable character starts every run with. */
-  startWeapon: ContentId;
   prologue?: ActDef;
   acts: ActDef[];
   epilogue?: ActDef;

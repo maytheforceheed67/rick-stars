@@ -417,12 +417,13 @@ export const PILOT_SCRIPTS: RoomScriptDef[] = [
       onEnter(first) {
         const c = api.room.markers('C')[0];
         if (c) api.addProp({ art: 'flying-car', x: c.x, y: c.y + 34, solid: true, radius: 46 });
+        const r = api.room.markers('R')[0];
+        if (r) api.addProp({ art: 'rick', x: r.x, y: r.y + 22, actor: 'rick' });
         if (api.room.cleared) return;
-        for (const p of api.room.markers('T')) api.spawnEnemy('junk-drone', p.x, p.y, { delay: 0.8 });
-        if (first) {
-          api.say('rick', LINES.rick.targetPractice, 3.2);
-          api.hint('Aim with the mouse and left click to fire (or shoot with the arrow keys). Space to dash.');
-        }
+        // Rick yells at Morty to throw stuff; the junk sails over, then the drones power up.
+        api.giveActWeapon();
+        for (const p of api.room.markers('T')) api.spawnEnemy('junk-drone', p.x, p.y, { delay: first ? 2.2 : 0.8 });
+        if (first) api.hint('Aim with the mouse and left click to throw (or use the arrow keys). Space to dash.');
       },
       onEnemiesCleared() {
         api.hint('Nice. Now get in the car: head east.');

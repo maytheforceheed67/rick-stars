@@ -16,7 +16,7 @@ This guide uses S01E02 "Lawnmower Dog" as the example. The Pilot (`src/content/e
      // mechanic tuning, timers, ...
    };
    ```
-   Regular enemies must have 8–15 HP and bosses 180–300 (`ENEMIES.regularHp` and `ENEMIES.bossHp`); a test enforces this.
+   Tune HP against the weapon Morty holds in that act (see [Weapons need a story reason](#weapons-need-a-story-reason)). A test holds every enemy an act can field, its summons included, to `ENEMIES.hitsToKill`: 2–4 hits for a regular enemy and 5–8 for an elite. It also holds every boss fight to `ENEMIES.bossFight`: 60–90 seconds, assuming Morty lands half his shots.
 4. **Export the episode** from `episode.ts` as one `EpisodeDef` (see the skeleton below).
 5. **List it** in `src/content/registry.ts`. That file is the only list of episodes:
    ```ts
@@ -28,7 +28,8 @@ This guide uses S01E02 "Lawnmower Dog" as the example. The Pilot (`src/content/e
 6. **Update the one test that pins what's playable.** In `tests/content.test.ts`, "lists all of Season 1…" expects `['S01E01']`; make it `['S01E01', 'S01E02']`. Everything else picks up the new episode automatically:
    - registry validation, including canon gating and templates;
    - the 1,000-seed dungeon test, which runs for every procedural act;
-   - the canon-gating pool test and the enemy HP bands.
+   - the canon-gating pool test;
+   - the story-weapon checks, the hits-to-kill bands and the boss-fight length.
 
    Add episode-specific tests if the episode has new rules worth pinning down.
 7. **Check it.**
@@ -44,8 +45,9 @@ Split things however reads best; the only fixed point is that `episode.ts` expor
 
 | File | Contents |
 |---|---|
-| `episode.ts` | The `EpisodeDef`: title, synopsis, starting weapon, prologue/acts/epilogue, `unlocksOnClear`, and the `content` bundle that registers everything below |
-| `acts.ts` | `BiomeDef` palettes and the `ActDef`s |
+| `episode.ts` | The `EpisodeDef`: title, synopsis, prologue/acts/epilogue, `unlocksOnClear`, and the `content` bundle that registers everything below |
+| `acts.ts` | `BiomeDef` palettes and the `ActDef`s, each with its story weapon beat |
+| `weapons.ts` | The episode's story weapons and their shot sprites |
 | `rooms.ts` | ASCII `RoomTemplate`s |
 | `enemies.ts`, `bosses.ts` | `EnemyDef`s (bosses have a `boss` block) |
 | `items.ts` | `ItemDef`s and `SynergyDef`s |
@@ -77,7 +79,6 @@ export const lawnmowerDog: EpisodeDef = {
   number: 2,
   title: 'Lawnmower Dog',
   synopsis: 'One sentence for the Season Map.',
-  startWeapon: 'ricks-spare-ray-gun', // shared; or an S01E02 weapon
   prologue: PROLOGUE,                 // optional; skippable after the first clear
   acts: [ACT_1, ACT_2, ACT_3],
   epilogue: EPILOGUE,                 // optional
@@ -117,6 +118,8 @@ export const ACT_1: ActDef = {
   shop: { keeperArt: 'dog-shopkeeper', name: 'Dog Treat Stand', alwaysStocks: ['some-consumable'] },
   specialRoom: 'dog-special',
   finale: [{ kind: 'boss', boss: 'snuffles', template: 'dog-boss' }], // or { kind: 'encounter', encounter: '...' }; more stages chain
+  // Where Morty's weapon comes from in this act; required when the act has enemies.
+  weapon: { item: 'ricks-spare-ray-gun', when: 'start', from: 'rick', line: "Here, Morty, catch! Point the green end at 'em." },
   rick: { gadget: 'freeze-ray', entrance: 'portal' }, // what Q does; add a GadgetDef for a new one
   mechanics: [],                         // MechanicDef ids
   startStatuses: [],
@@ -125,7 +128,31 @@ export const ACT_1: ActDef = {
 };
 ```
 
-The prologue and epilogue use `layout: { kind: 'fixed', start, rooms: [{ x, y, kind, template, script }] }` instead. Rooms next to each other on that grid get doors between them; see `PROLOGUE` in the Pilot.
+The prologue and epilogue use `layout: { kind: 'fixed', start, rooms: [{ x, y, kind, template, script }] }` instead. Rooms next to each other on that grid get doors between them; see `PROLOGUE` in the Pilot. A quiet act with nothing to fight (the Pilot's epilogue at home) sets `unarmed: true`, and Morty puts his weapon away.
+
+## Weapons need a story reason
+
+Morty never pulls a weapon out of nowhere. **Every weapon he uses needs a story reason, and that reason has to be shown in the episode where he gets it.** The validator refuses an act that has enemies but no `weapon` beat, and the tests check that each scripted beat is handed over by code in the episode.
+
+- **The beat.** Each act declares `weapon: { item, when, from, line }`:
+  - `when: 'start'`: handed over as the act begins, right after its intro;
+  - `when: 'scripted'`: a room script or mechanic calls `api.giveActWeapon()` at the story moment (the Pilot's garage script and its cover-blown moment in Customs). Until then Morty keeps the previous act's weapon, or has none.
+  - `from` is who hands it over and `line` is what they say. On screen, the line appears as a speech bubble, the weapon arcs into Morty's hands (from the giver, out of his own bag, or tossed in from off-screen), and the item banner explains it.
+- **Pick weapons that fit the story and the setting.** Follow the show where it says what Morty has. Where it doesn't, invent something that fits, and mark it `canon: false`. The Pilot:
+
+  | Act | Weapon | Why |
+  |---|---|---|
+  | Prologue | Garage junk (thrown) | Rick yells at him to throw stuff at the drones |
+  | School | Dodgeballs from his gym bag | No guns at school |
+  | Dimension 35-C | Rick's spare ray gun | Rick tosses it over; the critters bite |
+  | Customs | Rick's own ray gun | Canon: Rick hands it over when the cover is blown |
+
+- **Weapons are items** of `kind: 'weapon'`, `rarity: 'story'`, `noPool: true`, with a `WeaponSpec`. Beyond damage, fire rate, extra projectiles and spread, it can set:
+  - `style: 'thrown'` (no muzzle flash, drawn untinted) or the default `'energy'`;
+  - `shot` (a sprite key, or a list to cycle through: the Pilot's junk pile) and `spin`;
+  - `sizeMult`, `speedMult`, `rangeMult`, `knockbackMult`, `bounces` and `sfx`.
+- **Each act's weapon replaces the last one.** Items that change shots (bounces, freezing, extra projectiles, hooks) apply to whatever Morty holds, so they carry over between acts.
+- **Balance against the weapon.** The hits-to-kill test uses each act's own weapon, so a hard-hitting weapon needs tougher enemies.
 
 ## Rooms (`rooms.ts`)
 
@@ -177,7 +204,11 @@ export const dreamCrawler: EnemyDef = {
 - **Brains** are generator functions: `yield` waits a frame, `yield 0.5` waits half a second, and `yield () => cond` waits until the condition holds.
 - **Ready-made archetypes** live in `src/engine/brains.ts`: `chaser`, `shooter`, `charger`, `swarmer`, `idle` and `during`.
 - **Telegraphs.** Every attack should go through `api.windup(seconds, telegraph)`. The telegraph is a circle, arc, line or ring, or an array of them. The engine stretches any wind-up shorter than 0.4 s.
-- **Bosses** add `boss: { title, defeatCutscene?, reward?, onDefeat?, music? }`, and an act's finale stage points at them.
+- **Bosses** add `boss: { title, phases?, reward?, onDefeat?, defeatCutscene?, music? }`, and an act's finale stage points at them. More options:
+  - `character` names the character the boss is, so scenes and `ctx.say()` talk from his head;
+  - `objective` is the line shown while the fight lasts;
+  - `dazed(api, boss, done)` means the boss isn't killed. At 0 HP he's left dazed and harmless while the hook plays his ending, usually an in-engine scene. Frank works this way: Morty wears him out with dodgeballs, then Rick walks in and freezes him.
+- **Summons.** List what an enemy brings into the room under `spawns` (its brood, its backup). The validator checks the ids, and the hits-to-kill test covers the summons too.
 - **Enemy shots** use `kind` to pick the texture `shot-<kind>`:
   - built-in kinds: `orb`, `paper`, `ball`, `book`, `spore`, `bolt`, `stamp`, `ice`;
   - to add a new look, register a sprite keyed `shot-<kind>` in `content.sprites`.
@@ -231,7 +262,7 @@ export const dreamDepth: MechanicDef = {
 - `room()` and `here()` (the current room's script API);
 - `playerTile()`, `hint()` and `playCutscene()`;
 - `convertRooms(from, to)`, which is how Customs turns its calm rooms into combat rooms;
-- `setWeapon()`.
+- `giveActWeapon()`, which hands over the act's story weapon.
 
 See `mechanics/grapplingShoes.ts` and `mechanics/suspicion.ts`.
 
@@ -245,7 +276,28 @@ All three get the room script API:
 - spawning: `spawnEnemy`, `spawnPickup`, `spawnPedestal`, `addProp`;
 - room control: `makeCombat`, `lockDoors`/`unlockDoors`, `completeRoom`, `completeStage`, `endAct`;
 - presentation: `showChoice` (multiple choice with keys 1–4), `setObjective`, `setTimer`, `hint`, `playCutscene`;
+- story: `giveActWeapon()` and `actScene(steps, onDone)` (see below);
 - timing: room-scoped `after(seconds, fn)`.
+
+### In-engine scenes
+
+Big story beats should play out in the room, not only as comic panels. `api.actScene(steps, onDone)` runs a list of steps, one after another, while Morty stands still and can't be hurt. Space, Enter, E or a click skips ahead; every `do` step still runs, so skipping never loses a prop or a flag.
+
+| Step | Does |
+|---|---|
+| `{ kind: 'enter', who, via: 'door' \| 'portal' \| 'here', to }` | Walks in through the nearest door, steps out of a green portal, or fades in |
+| `{ kind: 'walk', who, to, speed? }` | Walks to a spot |
+| `{ kind: 'say', who, text, seconds? }` | A speech bubble; waits about as long as it takes to read |
+| `{ kind: 'face', who, toward }` | Turns to face a spot |
+| `{ kind: 'emote', who, emote: 'jump' \| 'shake' \| 'shock' }` | A little reaction |
+| `{ kind: 'beam', who, to, color, sfx? }` | A ray-gun beam (the freeze ray) |
+| `{ kind: 'wait', seconds }` | A pause |
+| `{ kind: 'do', fn }` | Runs code: swap a sprite, drop a prop, set a flag |
+| `{ kind: 'leave', who, via: 'door' \| 'portal' }` | Walks out, or leaves through a portal |
+
+- **Who.** A `who` is a character id with a world sprite. The act's playable character is the player himself.
+- **Spots.** A spot is `{ x, y }`, or `{ near: 'rick', side?, gap? }` to stand next to someone.
+- **Example.** Frank's `dazed` hook in the Pilot's `bosses.ts`.
 
 A script returns hooks: `onEnter(firstTime)`, `update(dt)`, `onExit()`, `onEnemiesCleared()`, `onBossDefeated()`. The Pilot's `encounters.ts` covers most patterns: a timed puzzle, waves, an escape run and a quiz.
 

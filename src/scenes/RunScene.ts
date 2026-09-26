@@ -21,12 +21,14 @@ import { Fx, type BurstStyle } from '../engine/runtime/Fx';
 import { Player, type PlayerHost, type PlayerInput } from '../engine/runtime/Player';
 import { ProjectilePool } from '../engine/runtime/Projectiles';
 import { RoomView, type DoorSpec } from '../engine/runtime/RoomView';
+import { readTime, Stage } from '../engine/runtime/Stage';
 import { HazardLayer, TelegraphLayer } from '../engine/runtime/Telegraphs';
 import { WorldObjects, type Interactable, type PedestalObj, type PickupObj, type PropObj, type Ware } from '../engine/runtime/WorldObjects';
 import type { Settings } from '../engine/save/save';
 import { persist, svc } from '../engine/services';
 import type {
   ActDef,
+  BossInfo,
   ContentId,
   EnemyRef,
   EnemySelf,
@@ -48,7 +50,9 @@ import type {
   RoomKind,
   RoomScript,
   RoomScriptApi,
+  SceneStep,
   StatusFlags,
+  StoryWeapon,
   TileKind,
   Vec,
 } from '../engine/types';
@@ -158,6 +162,14 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   /** A swap waiting for its confirming second E press. */
   private pendingSwap: PedestalObj | null = null;
   private pendingSwapUntil = 0;
+  /** In-engine acted scenes (characters walking and talking in the room). */
+  private stage!: Stage;
+  /** Whether Morty's controls were already locked when the current scene started. */
+  private lockedBeforeScene = false;
+  /** Run time when the act's story weapon changes hands (0 = nothing pending). */
+  private weaponDue = 0;
+  /** Counts shots fired, to cycle through a thrown weapon's looks. */
+  private shotsFired = 0;
   private readonly playerAnchor = () => ({ x: this.player.x, y: this.player.y - 48 });
   private readonly screenAnchor = () => {
     const v = this.cameras.main.worldView;
@@ -199,6 +211,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.meterAnnounced = false;
     this.interactable = null;
     this.pendingSwap = null;
+    this.weaponDue = 0;
     this.camKick = { x: 0, y: 0 };
     this.camRest = null;
     this.timeFactor = 1;
@@ -229,7 +242,6 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.maxHpValue = Math.max(2, Math.round(base.maxHearts) * 2);
     this.run = new RunState(this.reg, ep, data.seed, {
       skipPrologue: cleared && !data.playPrologue,
-      weapon: ep.startWeapon,
       startHp: this.maxHpValue,
     });
     const rec = (save.episodes[ep.id] ??= { attempts: 0, clears: 0, bestTimeMs: null });
@@ -245,6 +257,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.fx = new Fx(this, () => this.settings());
     this.objects = new WorldObjects(this);
     this.player = new Player(this, this, this.playerTexture(), 0, 0);
+    this.stage = this.makeStage();
     this.ctx = this.buildCtx();
     this.setupInput();
 
@@ -443,10 +456,11 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   private setupInput(): void {
     const kb = this.input.keyboard!;
-    this.keys = kb.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,SHIFT,E,Q,F,R,C,TAB,ESC,M', true) as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = kb.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,SHIFT,E,Q,F,R,C,TAB,ESC,M,ENTER', true) as Record<string, Phaser.Input.Keyboard.Key>;
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (p.rightButtonDown() && !this.dead && !this.player.controlLocked) this.useActive();
+      if (this.stage.running) this.stage.skip();
+      else if (p.rightButtonDown() && !this.dead && !this.player.controlLocked) this.useActive();
     });
   }
 
@@ -523,10 +537,19 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     run.time += dt;
     this.runTimers();
     if (!this.roomView) return;
+    if (this.weaponDue && run.time >= this.weaponDue && !this.stage.running) {
+      this.weaponDue = 0;
+      this.giveActWeapon();
+    }
     if (this.hudTimer) this.hudTimer.left = Math.max(0, this.hudTimer.left - dt);
     const changes = run.statuses.tick(dt);
     if (changes.length) this.onStatusChanges(changes);
 
+    if (this.stage.running) {
+      const JD = Phaser.Input.Keyboard.JustDown;
+      const k = this.keys;
+      if (JD(k.SPACE) || JD(k.ENTER) || JD(k.E)) this.stage.skip();
+    }
     const input = this.readInput();
     this.handleButtons();
     if (!this.roomView || this.ended) return;
@@ -632,12 +655,76 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     run.rooms = floor.rooms.map((r) => freshRoomState(r.kind));
     run.stage = -1;
     for (const s of act.startStatuses ?? []) run.statuses.add(s);
+    this.prepareWeapon(index);
     this.invalidateStats();
     this.mechanics.forEach((m) => m.inst.onActStart?.());
+    this.weaponDue = 0;
     this.playCutscenes(act.intro ?? [], () => {
       this.enterRoom(floor.startId);
       this.hud.banner(act.name, act.subtitle);
+      // A beat after arriving, and never later than the first room he walks into.
+      if (act.weapon?.when === 'start') this.weaponDue = run.time + 1.6;
     });
+  }
+
+  /**
+   * Morty's weapon as an act begins: put away for a quiet act, otherwise kept from the last act.
+   * Starting part-way through an episode (a debug jump) hands over whatever the story would have
+   * given him by now.
+   */
+  private prepareWeapon(index: number): void {
+    const run = this.run;
+    const inv = run.inventory;
+    if (run.act.unarmed) {
+      inv.weapon = null;
+      return;
+    }
+    if (inv.weapon) return;
+    for (let i = index - 1; i >= 0; i--) {
+      const w = run.sequence[i].weapon;
+      if (w) {
+        inv.weapon = w.item;
+        return;
+      }
+    }
+  }
+
+  /**
+   * The act's story weapon changes hands on screen: whoever gives it says their line, the weapon
+   * arcs into Morty's hands, and the item banner says what it is.
+   */
+  private giveActWeapon(): void {
+    const run = this.run;
+    const w: StoryWeapon | undefined = run.act.weapon;
+    if (!w || run.inventory.weapon === w.item || !this.roomView) return;
+    const item = this.reg.items.get(w.item);
+    if (!item) return;
+    const p = this.player;
+    this.say(w.from, w.line, readTime(w.line) + 0.8);
+    // From the giver's hands if they're here, out of Morty's own bag, or tossed in from off-screen.
+    const giver = w.from === run.act.playable ? null : (this.actors.get(w.from)?.() ?? null);
+    const view = this.cameras.main.worldView;
+    const start = w.from === run.act.playable ? { x: p.x, y: p.y - 10 } : (giver ?? { x: p.x < view.centerX ? view.right - 40 : view.x + 40, y: view.y + 40 });
+    const icon = this.add.image(start.x, start.y, `icon-${item.id}`).setDepth(5200).setScale(1.3);
+    const arc = { t: 0 };
+    const high = w.from === run.act.playable ? 90 : 140;
+    this.tweens.add({
+      targets: arc,
+      t: 1,
+      duration: 620,
+      ease: 'Sine.easeInOut',
+      onUpdate: () => {
+        const t = arc.t;
+        icon.setPosition(start.x + (this.player.x - start.x) * t, start.y + (this.player.y - 16 - start.y) * t - Math.sin(Math.PI * t) * high);
+        icon.setAngle(t * 540);
+      },
+      onComplete: () => {
+        icon.destroy();
+        this.fx.pop(this.player.x, this.player.y - 16, 'fx-star', item.weapon?.color ?? 0xffffff, 0.6, 2.4, 220);
+        this.giveItem(w.item);
+      },
+    });
+    this.sfx('throw-light');
   }
 
   private enterRoom(id: number, from?: Dir): void {
@@ -722,6 +809,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.doorsOpen = true;
     this.updateDoors(true);
     this.updateMusic();
+    // Walked on before the act's weapon changed hands: hand it over right away.
+    if (this.weaponDue) this.weaponDue = Math.min(this.weaponDue, run.time + 0.4);
   }
 
   private startStage(stage: number, st: RoomState, firstVisit: boolean): void {
@@ -735,6 +824,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       const at = this.roomInfoObj!.markers('e')[0] ?? { x: this.roomView!.widthPx / 2, y: this.roomView!.heightPx / 2 };
       const boss = this.spawnEnemy(spec.boss, at.x, at.y, { delay: 1.0 });
       this.bossEnemy = boss;
+      const info = boss?.def.boss;
+      if (boss && info?.character) this.actors.set(info.character, () => (boss.alive ? { x: boss.x, y: boss.y - boss.displayHeight * boss.originY - 6 } : null));
+      if (info?.objective) this.objectiveText = info.objective;
       if (boss && firstVisit) {
         this.hud.banner(boss.def.boss?.title ?? boss.def.name, 'BOSS', 0xe0484d);
         this.time.delayedCall(300, () => this.sfx('boss-roar'));
@@ -837,6 +929,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   }
 
   private teardownRoom(): void {
+    if (this.stage?.running) this.endSceneLock();
+    this.stage?.clear();
     for (const e of this.enemies) e.remove();
     this.enemies = [];
     this.bossEnemy = null;
@@ -928,7 +1022,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   /** A live, hostile enemy (not a calm NPC or a room hazard). */
   private isTarget(e: Enemy): boolean {
-    return e.alive && !e.passive && !e.def.hazard;
+    return e.alive && !e.passive && !e.dazed && !e.def.hazard;
   }
 
   /** Morty falls if he's within `radius` of (x, y) and nothing lets him stand on a drop. */
@@ -1238,8 +1332,57 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.fx.shake(14, 500);
     this.fx.flash(0xffffff, 180);
     this.updateMusic();
+    // Doors stay shut until the defeat has played out (completeStage opens the way on).
+    this.scriptLock = true;
     const info = boss.def.boss!;
     if (this.script?.onBossDefeated?.()) return;
+    this.finishBossDefeat(info, at);
+  }
+
+  /**
+   * A boss who isn't killed: at 0 HP he's left dazed and harmless while his ending plays out in
+   * the room (Rick walking in to freeze Frank), then the defeat goes on as usual.
+   */
+  private dazeBoss(e: Enemy): void {
+    const info = e.def.boss!;
+    e.hp = 0;
+    e.daze();
+    this.bossEnemy = null;
+    this.objectiveText = null;
+    this.scriptLock = true;
+    for (const o of [...this.enemies]) {
+      if (o === e || !o.alive) continue;
+      this.fx.burst('death', o.x, o.y, 6);
+      o.remove();
+    }
+    this.enemies = [e];
+    this.enemyShots.clear();
+    this.hazards.clear();
+    this.telegraphs.clear();
+    this.run.stats.kills++;
+    this.fx.hitStop(140);
+    this.fx.shake(10, 360);
+    this.fx.flash(0xffffff, 140);
+    this.fx.ring(e.x, e.y, 0xffe27a, e.radius * 3, 320, 5);
+    this.fx.floatText(e.x, e.y - e.displayHeight * e.originY - 10, 'DAZED!', '#ffe27a', 26);
+    this.sfx('stagger');
+    this.updateMusic();
+    const at = { x: e.x, y: e.y };
+    this.after(
+      0.7,
+      () =>
+        info.dazed!(this.scriptApi!, e, () => {
+          if (e.alive) {
+            this.enemies = this.enemies.filter((o) => o !== e);
+            e.remove();
+          }
+          this.finishBossDefeat(info, at);
+        }),
+      true,
+    );
+  }
+
+  private finishBossDefeat(info: BossInfo, at: Vec): void {
     const finish = () => {
       info.onDefeat?.(this.scriptApi!, at);
       if (info.reward && !this.run.inventory.has(info.reward)) {
@@ -1398,12 +1541,21 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     });
   }
 
+  /** Morty can only fire once the story has handed him something to fight with. */
+  armed(): boolean {
+    return !!this.run.inventory.weapon;
+  }
+
   onFire(angle: number): void {
+    const id = this.run.inventory.weapon;
+    const w = id ? this.reg.items.get(id)?.weapon : undefined;
+    if (!w) return;
     const st = this.stats();
-    const weaponDef = this.reg.items.get(this.run.inventory.weapon);
     const n = Math.max(1, Math.round(st.projectiles));
     const spread = st.spread + (n > 1 ? 0.14 * (n - 1) : 0);
     const p = this.player;
+    const thrown = w.style === 'thrown';
+    const looks = typeof w.shot === 'string' ? [w.shot] : (w.shot ?? ['shot-player']);
     for (let i = 0; i < n; i++) {
       const a = n > 1 ? angle - spread / 2 + (spread * i) / (n - 1) : angle;
       this.playerShots.spawn({
@@ -1415,15 +1567,23 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
         radius: st.shotSize,
         life: st.range / st.shotSpeed,
         bounces: Math.round(st.bounces),
-        texture: 'shot-player',
-        tint: weaponDef?.weapon?.color ?? 0x97ce4c,
+        // Junk cycles through its pile in order, so the look never touches the gameplay RNG.
+        texture: looks[this.shotsFired++ % looks.length],
+        tint: thrown ? undefined : w.color,
+        glow: w.color,
+        spin: w.spin,
         source: 'shot',
       });
     }
-    this.sfx((weaponDef?.weapon?.damageMult ?? 1) > 1.2 ? 'shoot-heavy' : 'shoot');
-    const color = weaponDef?.weapon?.color ?? 0x97ce4c;
-    this.fx.pop(p.x + Math.cos(angle) * 24, p.y + Math.sin(angle) * 24 - 6, 'fx-star', color, 0.5, 1.5, 90, angle);
-    this.kickCamera(angle + Math.PI, 2.2);
+    this.sfx(w.sfx ?? (w.damageMult > 1.2 ? 'shoot-heavy' : 'shoot'));
+    if (thrown) {
+      // A throw: a little whoosh off his hand and a lighter kick than a gun.
+      this.fx.pop(p.x + Math.cos(angle) * 22, p.y + Math.sin(angle) * 22 - 6, 'fx-puff', 0xffffff, 0.3, 1, 130);
+      this.kickCamera(angle + Math.PI, 1.2);
+    } else {
+      this.fx.pop(p.x + Math.cos(angle) * 24, p.y + Math.sin(angle) * 24 - 6, 'fx-star', w.color, 0.5, 1.5, 90, angle);
+      this.kickCamera(angle + Math.PI, 2.2);
+    }
     runHook(this.sources(), 'onFire', this.ctx, { angle, x: p.x, y: p.y });
     this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'fire', angle }));
   }
@@ -1435,7 +1595,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   }
 
   damagePlayer(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): void {
-    if (this.dead || this.ended || halves <= 0 || this.godModeOn) return;
+    if (this.dead || this.ended || halves <= 0 || this.godModeOn || this.stage.running) return;
     const p = this.player;
     if (!opts?.ignoreInvulnerability && p.isInvulnerable) {
       if (p.inPerfectWindow) this.perfectDodge();
@@ -1694,8 +1854,10 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.fx.floatText(e.x + this.run.play.float(-10, 10), e.y - e.displayHeight * e.originY, String(Math.round(dmg)), dmg >= 8 ? '#ffd166' : '#ffffff', dmg >= 8 ? 18 : 14);
     }
     if (dmg >= 8) this.fx.shake(Math.min(12, 2 + dmg * 0.45), 90);
-    if (killed && e.alive) this.killEnemy(e, info, shatter);
-    else if (!killed) this.sfx(dmg >= 8 ? 'hit-heavy' : 'hit');
+    if (killed && e.alive) {
+      if (e === this.bossEnemy && e.def.boss?.dazed) this.dazeBoss(e);
+      else this.killEnemy(e, info, shatter);
+    } else if (!killed) this.sfx(dmg >= 8 ? 'hit-heavy' : 'hit');
   }
 
   private killEnemy(e: Enemy, info: HitInfo, shatter: boolean): void {
@@ -1895,6 +2057,61 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.timeFactor = 1;
     this.physics.world.timeScale = 1;
     this.tweens.timeScale = 1;
+  }
+
+  private makeStage(): Stage {
+    return new Stage({
+      scene: this,
+      fx: this.fx,
+      playerId: () => this.run.act.playable,
+      playerPos: () => ({ x: this.player.x, y: this.player.y }),
+      movePlayer: (x, y) => this.player.setPosition(x, y),
+      facePlayer: (left) => {
+        this.player.aimAngle = left ? Math.PI : 0;
+      },
+      spriteKey: (who) => this.reg.characters.get(who)?.sprite?.key ?? null,
+      say: (who, text, seconds) => this.say(who, text, seconds),
+      setAnchor: (who, anchor) => {
+        if (anchor) this.actors.set(who, anchor);
+        else this.actors.delete(who);
+      },
+      doorNear: (to) => this.doorNear(to),
+      clamp: (p) => this.clampToRoom(p),
+      sfx: (id) => this.sfx(id),
+    });
+  }
+
+  /** Plays an in-engine scene; Morty can't move (or be hurt) until it's over. */
+  private playScene(steps: SceneStep[], onDone?: () => void): void {
+    if (this.stage.running) this.stage.skip();
+    this.lockedBeforeScene = this.player.controlLocked;
+    this.player.setControlLocked(true);
+    this.stage.play(steps, () => {
+      this.endSceneLock();
+      onDone?.();
+    });
+  }
+
+  private endSceneLock(): void {
+    this.player.setControlLocked(this.lockedBeforeScene);
+    this.lockedBeforeScene = false;
+  }
+
+  /** The door nearest a spot (where someone walking in comes from), or the bottom of the room. */
+  private doorNear(to: Vec): Vec {
+    const view = this.roomView;
+    if (!view) return to;
+    const door = [...view.doors].sort((a, b) => Math.hypot(a.x - to.x, a.y - to.y) - Math.hypot(b.x - to.x, b.y - to.y))[0];
+    return door ? { x: door.x, y: door.y } : { x: view.widthPx / 2, y: view.heightPx - TILE };
+  }
+
+  private clampToRoom(p: Vec): Vec {
+    const view = this.roomView;
+    if (!view) return p;
+    return {
+      x: Phaser.Math.Clamp(p.x, TILE * 1.5, view.widthPx - TILE * 1.5),
+      y: Phaser.Math.Clamp(p.y, TILE * 1.5, view.heightPx - TILE * 1.5),
+    };
   }
 
   private callRick(): void {
@@ -2238,6 +2455,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
         this.hintText = t;
       },
       after: (s: number, fn: () => void) => this.after(s, fn, true),
+      giveActWeapon: () => this.giveActWeapon(),
+      actScene: (steps: SceneStep[], done?: () => void) => this.playScene(steps, done),
     };
     return Object.assign(Object.create(this.ctx) as GameCtx, extra) as RoomScriptApi;
   }
@@ -2260,7 +2479,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
           }
         });
       },
-      setWeapon: (id: ContentId) => this.giveItem(id),
+      giveActWeapon: () => this.giveActWeapon(),
     };
     return Object.assign(Object.create(this.ctx) as GameCtx, extra) as MechanicApi;
   }
@@ -2280,7 +2499,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       rick: { value: run.rickMeter / RICK_METER.max, ready: run.rickMeter >= RICK_METER.max, gadget: gadget?.name ?? 'Rick' },
       active: inv.active ? { id: inv.active.id, name: items.get(inv.active.id)?.name ?? inv.active.id, charge: inv.active.charge, max: inv.active.max } : null,
       consumable: inv.consumable ? { id: inv.consumable, name: items.get(inv.consumable)?.name ?? inv.consumable } : null,
-      weapon: { id: inv.weapon, name: items.get(inv.weapon)?.name ?? inv.weapon },
+      weapon: inv.weapon ? { id: inv.weapon, name: items.get(inv.weapon)?.name ?? inv.weapon } : null,
+      scene: this.stage.running,
       passives: inv.passives.map((id) => ({ id, name: items.get(id)?.name ?? id })),
       scrap: run.scrap,
       statuses: run.statuses.list().map((s) => ({ id: s.def.id, name: s.def.name, positive: s.def.positive, remaining: s.remaining, kind: s.def.duration.kind })),
@@ -2362,6 +2582,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       cleared: this.roomState?.cleared,
       hp: this.run.hp,
       scrap: this.run.scrap,
+      weapon: this.run.inventory.weapon,
+      scene: this.stage.running,
       enemies: this.hostileCount(),
       shots: this.playerShots.count() + this.enemyShots.count(),
       ended: this.ended,

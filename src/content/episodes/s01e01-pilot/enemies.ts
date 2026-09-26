@@ -35,6 +35,7 @@ export const popQuiz: EnemyDef = {
 
 export const hallMonitor: EnemyDef = {
   id: 'hall-monitor',
+  spawns: ['pop-quiz'],
   name: 'Hall Monitor',
   firstAppears: S01E01,
   canon: false,
@@ -98,6 +99,7 @@ export const dodgeballJock: EnemyDef = {
 
 export const cafeteriaSlop: EnemyDef = {
   id: 'cafeteria-slop',
+  spawns: ['slop-blob'],
   name: 'Cafeteria Slop',
   firstAppears: S01E01,
   canon: false,
@@ -564,6 +566,7 @@ export const miteling: EnemyDef = {
 /** Summoner: a lumpy nest that keeps birthing mitelings. */
 export const broodMound: EnemyDef = {
   id: 'brood-mound',
+  spawns: ['miteling'],
   name: 'Brood Mound',
   firstAppears: S01E01,
   canon: false,
@@ -701,6 +704,7 @@ export const notary: EnemyDef = {
 /** Summoner: radios for backup, and flings paperwork while waiting. */
 export const dispatcher: EnemyDef = {
   id: 'gromflomite-dispatcher',
+  spawns: ['gromflomite-clerk', 'gromflomite-guard'],
   name: 'Gromflomite Dispatcher',
   firstAppears: S01E01,
   canon: true,

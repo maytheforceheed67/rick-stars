@@ -5,7 +5,7 @@ import type { ItemDef } from '../../engine/types';
 export const spareRayGun: ItemDef = {
   id: 'ricks-spare-ray-gun',
   name: "Rick's Spare Ray Gun",
-  blurb: "Found it in the couch cushions. Rick doesn't remember making it, which is somehow worse.",
+  blurb: "Rick's backup gun, tossed over the moment you landed. The critters here bite.",
   firstAppears: 'S01E01',
   canon: false,
   kind: 'weapon',

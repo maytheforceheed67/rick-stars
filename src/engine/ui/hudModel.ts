@@ -18,7 +18,10 @@ export interface HudModel {
   rick: { value: number; ready: boolean; gadget: string };
   active: { id: ContentId; name: string; charge: number; max: number } | null;
   consumable: { id: ContentId; name: string } | null;
-  weapon: { id: ContentId; name: string };
+  /** Null until the story hands Morty a weapon (and in quiet acts). */
+  weapon: { id: ContentId; name: string } | null;
+  /** An in-engine scene is playing (show how to skip it). */
+  scene: boolean;
   passives: { id: ContentId; name: string }[];
   scrap: number;
   statuses: { id: ContentId; name: string; positive: boolean; remaining: number; kind: string }[];

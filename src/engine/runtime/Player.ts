@@ -26,6 +26,8 @@ export interface PlayerHost {
   stats(): StatBlock;
   flags(): StatusFlags;
   tileUnderPlayer(): TileKind;
+  /** False until the story hands Morty something to fight with. */
+  armed(): boolean;
   onFire(angle: number): void;
   onDash(): void;
   damagePlayer(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): void;
@@ -252,7 +254,7 @@ export class Player implements PlayerRef {
     if (!this.locked) {
       this.aimAngle = Math.atan2(input.aimY - this.sprite.y, input.aimX - this.sprite.x);
       if (flags.wobblyAim) this.aimAngle += Math.sin(this.t * 4.3) * 0.35 + Math.sin(this.t * 9.7) * 0.12;
-      if (input.fire && this.fireCooldown <= 0) {
+      if (input.fire && this.fireCooldown <= 0 && this.host.armed()) {
         this.fireCooldown = 1 / Math.max(0.1, stats.fireRate);
         this.host.onFire(this.aimAngle);
       }

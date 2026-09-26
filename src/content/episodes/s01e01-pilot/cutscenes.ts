@@ -34,13 +34,6 @@ export const PILOT_CUTSCENES: CutsceneDef[] = [
     { backdrop: 'classroom', speaker: 'morty', expression: 'sleepy', text: "Huh? I'm up! I'm... mostly up." },
     { backdrop: 'classroom', text: 'Morty is Sleep-Deprived: slower shots for the first few rooms.', caption: true },
   ], 'Act 1'),
-  cs('pilot-frank-frozen', [
-    { backdrop: 'hallway', speaker: 'frank', expression: 'angry', text: 'You... you called me poor! Nobody calls me poor, Smith!' },
-    { backdrop: 'hallway', speaker: 'morty', expression: 'scared', text: "I didn't! I-I didn't say anything!" },
-    { backdrop: 'hallway', text: 'ZZZZAP.', caption: true, sfx: 'freeze-ray' },
-    { backdrop: 'hallway', speaker: 'rick', expression: 'normal', text: "Relax, Morty. Freeze ray. He'll thaw. Probably. —*urrp*— C'mon, we're leaving." },
-    { backdrop: 'hallway', speaker: 'morty', expression: 'angry', text: "Rick! You can't just freeze people at school!" },
-  ]),
   cs('pilot-frank-shatter', [
     { backdrop: 'hallway', text: 'Later, in the hallway...', caption: true },
     { backdrop: 'hallway', speaker: 'summer', expression: 'happy', text: 'Hey, Frank. I like your... frozen... look. Very chill.' },
@@ -86,14 +79,14 @@ export const PILOT_CUTSCENES: CutsceneDef[] = [
   cs('pilot-cover-blown', [
     { backdrop: 'customs', text: 'BEEP. BEEP. BEEP.', caption: true, sfx: 'alarm' },
     { backdrop: 'customs', speaker: 'gromflomite', expression: 'angry', text: 'Seed contraband detected! Lock it down!' },
-    { backdrop: 'customs', speaker: 'rick', expression: 'normal', text: 'Welp. Plan B. Here, Morty, take my ray gun.' },
+    { backdrop: 'customs', speaker: 'rick', expression: 'normal', text: 'Welp. Plan B.' },
     { backdrop: 'customs', speaker: 'morty', expression: 'scared', text: "Rick, I can't shoot people!" },
-    { backdrop: 'customs', speaker: 'rick', expression: 'normal', text: "They're robots, Morty. Totally robots. Shoot the robots." },
+    { backdrop: 'customs', speaker: 'rick', expression: 'normal', text: "They're robots, Morty. Totally robots." },
   ]),
   cs('pilot-customs-outro', [
     { backdrop: 'portal', text: 'Through the portal. Home.', caption: true, sfx: 'portal' },
     { backdrop: 'living-room', speaker: 'morty', expression: 'angry', text: 'Rick! Those were NOT robots! They had families, Rick!' },
-    { backdrop: 'living-room', speaker: 'rick', expression: 'normal', text: 'Morty, you gotta —*urrp*— learn to let things go.' },
+    { backdrop: 'living-room', speaker: 'rick', expression: 'normal', text: 'Morty, you gotta —*urrp*— learn to let things go. And gimme my gun back.' },
   ]),
   cs('pilot-epilogue-packing', [
     { backdrop: 'living-room', text: 'Meanwhile, at home...', caption: true },

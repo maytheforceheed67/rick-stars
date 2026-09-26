@@ -21,18 +21,19 @@ export interface AddResult {
 
 /** What the player is carrying. Pure logic; items are looked up by the caller. */
 export class Inventory {
-  weapon: ContentId;
+  /** Each act hands Morty its own story weapon; null while he has nothing to fight with. */
+  weapon: ContentId | null;
   readonly passives: ContentId[] = [];
   active: ActiveSlot | null = null;
   consumable: ContentId | null = null;
 
-  constructor(weapon: ContentId) {
+  constructor(weapon: ContentId | null = null) {
     this.weapon = weapon;
   }
 
   /** Items that count for hooks, stats and synergies (consumables don't until used). */
   owned(): ContentId[] {
-    const out = [this.weapon, ...this.passives];
+    const out = this.weapon ? [this.weapon, ...this.passives] : [...this.passives];
     if (this.active) out.push(this.active.id);
     return out;
   }
@@ -71,6 +72,7 @@ export class Inventory {
         return { added: true, dropped };
       }
       case 'weapon':
+        // A new story weapon replaces the old one; items that change shots apply to either.
         this.weapon = item.id;
         return { added: true };
     }

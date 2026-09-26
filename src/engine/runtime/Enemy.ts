@@ -97,6 +97,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   shieldHits = 0;
   /** Seconds left staggered (open to extra damage). */
   staggerLeft = 0;
+  /** A beaten boss left reeling instead of killed (BossInfo.dazed): harmless, can't be hurt. */
+  dazed = false;
   readonly splitChild: boolean;
   /** Movement speed multiplier (hasty elites). */
   readonly speedMult: number;
@@ -322,6 +324,19 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     this.bubble = undefined;
   }
 
+  /** Beaten but not killed: stops fighting and reels on the spot with stars overhead. */
+  daze(): void {
+    this.dazed = true;
+    this.brain = null;
+    this.invulnerable = true;
+    this.staggerLeft = Infinity;
+    this.windupAmt = 0;
+    this.moveVx = 0;
+    this.moveVy = 0;
+    this.unfreeze();
+    this.setNameplate(null);
+  }
+
   flashHit(): void {
     this.flashLeft = 0.08;
     this.flinch = 1;
@@ -436,7 +451,9 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     const p = this.host.player;
     const lookAngle = this.windupAmt > 0 || this.facing ? this.facing || Math.atan2(p.y - this.y, p.x - this.x) : Math.atan2(p.y - this.y, p.x - this.x);
     this.setFlipX(Math.cos(lookAngle) < 0);
-    if (this.windupAmt > 0 && this.frozenLeft <= 0) {
+    if (this.dazed) {
+      this.setAngle(Math.sin(time * 4) * 9);
+    } else if (this.windupAmt > 0 && this.frozenLeft <= 0) {
       this.setAngle(Math.sin(time * 42) * 7 * this.windupAmt);
     } else if (this.flying) {
       this.setAngle(Math.sin(time * 5 + this.uid) * 4);
