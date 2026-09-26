@@ -137,6 +137,39 @@ export const SFX: Record<string, SfxRecipe> = {
   ],
   slash: [{ wave: 'noise', freq: 3000, duration: 0.12, volume: 0.22, filter: { type: 'bandpass', freq: 3500, freqEnd: 1200, q: 1.5 } }],
   throw: [{ wave: 'noise', freq: 1000, duration: 0.1, volume: 0.14, filter: { type: 'bandpass', freq: 800, freqEnd: 1600, q: 1 } }],
+  // A small critter leaping.
+  hop: [{ wave: 'sine', freq: 420, freqEnd: 880, duration: 0.1, volume: 0.1 }],
+  // A shot's little impact explosion.
+  pop: [
+    { wave: 'noise', freq: 1200, duration: 0.09, volume: 0.16, filter: { type: 'lowpass', freq: 1800, freqEnd: 400 } },
+    { wave: 'sine', freq: 240, freqEnd: 90, duration: 0.1, volume: 0.14 },
+  ],
+  // Chain lightning jumping between enemies.
+  zap: [
+    { wave: 'sawtooth', freq: 1400, freqEnd: 600, duration: 0.08, volume: 0.1, filter: { type: 'highpass', freq: 900 } },
+    { wave: 'noise', freq: 5000, duration: 0.07, volume: 0.08, filter: { type: 'highpass', freq: 3000 } },
+  ],
+  // A critical hit.
+  crit: [
+    { wave: 'square', freq: 1320, freqEnd: 1980, duration: 0.08, volume: 0.1 },
+    { wave: 'noise', freq: 800, duration: 0.1, volume: 0.16, filter: { type: 'lowpass', freq: 1400 } },
+  ],
+  // A charged shot being let go.
+  'charge-shot': [
+    { wave: 'sawtooth', freq: 180, freqEnd: 90, duration: 0.25, volume: 0.18, filter: { type: 'lowpass', freq: 1600 } },
+    { wave: 'sine', freq: 900, freqEnd: 300, duration: 0.2, volume: 0.12 },
+  ],
+  // The next shot is charged and ready.
+  'charge-ready': [{ wave: 'triangle', freq: 660, freqEnd: 1320, duration: 0.12, volume: 0.08 }],
+  // A synergy or transformation kicking in.
+  synergy: [
+    { wave: 'triangle', freq: 523, duration: 0.12, volume: 0.14 },
+    { wave: 'triangle', freq: 659, duration: 0.12, volume: 0.14, delay: 0.1 },
+    { wave: 'triangle', freq: 784, duration: 0.12, volume: 0.14, delay: 0.2 },
+    { wave: 'triangle', freq: 1047, duration: 0.3, volume: 0.16, delay: 0.3, vibrato: { rate: 8, depth: 12 } },
+  ],
+  // Morty's shot hits nothing but he dodged a hit anyway (Seed Smuggler).
+  whiff: [{ wave: 'noise', freq: 2500, duration: 0.12, volume: 0.1, filter: { type: 'bandpass', freq: 2200, freqEnd: 600, q: 2 } }],
   // Morty throwing something: a quick whoosh with a little grunt of effort under it.
   'throw-light': [
     { wave: 'noise', freq: 1400, duration: 0.11, volume: 0.16, filter: { type: 'bandpass', freq: 1300, freqEnd: 3200, q: 1.2 } },

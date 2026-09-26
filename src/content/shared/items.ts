@@ -6,6 +6,8 @@ export const spareRayGun: ItemDef = {
   id: 'ricks-spare-ray-gun',
   name: "Rick's Spare Ray Gun",
   blurb: "Rick's backup gun, tossed over the moment you landed. The critters here bite.",
+  effect: 'Fires green energy bolts.',
+  tags: ['shots'],
   firstAppears: 'S01E01',
   canon: false,
   kind: 'weapon',

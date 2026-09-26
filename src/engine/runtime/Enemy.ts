@@ -183,6 +183,15 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   get frozen(): boolean {
     return this.frozenLeft > 0;
   }
+  get poisoned(): boolean {
+    return this.poisonLeft > 0;
+  }
+  get stunned(): boolean {
+    return this.stunLeft > 0;
+  }
+  get slowed(): boolean {
+    return this.slowLeft > 0 && this.slowMult < 1;
+  }
   get vx(): number {
     return (this.body as Phaser.Physics.Arcade.Body).velocity.x;
   }
@@ -288,6 +297,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   slow(mult: number, seconds: number): void {
     this.slowMult = mult;
     this.slowLeft = Math.max(this.slowLeft, seconds);
+    this.refreshTint();
   }
 
   heal(amount: number): void {
@@ -354,6 +364,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   private refreshTint(): void {
     if (this.frozenLeft > 0) this.setTint(0xa8e4ff);
     else if (this.poisonLeft > 0) this.setTint(0xb6f08a);
+    else if (this.slowed) this.setTint(0xc9b8e8);
     else this.clearTint();
   }
 
@@ -391,7 +402,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     }
     if (this.slowLeft > 0) {
       this.slowLeft -= dt;
-      if (this.slowLeft <= 0) this.slowMult = 1;
+      if (this.slowLeft <= 0) {
+        this.slowMult = 1;
+        this.refreshTint();
+      }
     }
 
     if (this.staggerLeft > 0) this.staggerLeft = Math.max(0, this.staggerLeft - dt);

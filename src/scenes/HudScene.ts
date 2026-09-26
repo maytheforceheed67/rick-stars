@@ -60,6 +60,11 @@ export class HudScene extends Phaser.Scene implements HudApi {
   init(data: HudData): void {
     this.source = data.run;
     this.ready = false;
+    this.bannerQueue = [];
+    this.bannerBox = null;
+    this.bannerTimer = null;
+    this.cheerQueue = [];
+    this.cheering = false;
     this.hearts = [];
     this.texts = {};
     this.icons = {};
@@ -404,22 +409,99 @@ export class HudScene extends Phaser.Scene implements HudApi {
     });
   }
 
-  itemBanner(name: string, blurb: string, kind: string): void {
+  itemBanner(name: string, blurb: string, effect: string, kind: string): void {
     this.whenReady(() => {
-      const title = this.add.text(0, 0, name, displayStyle(34, '#ffe27a')).setOrigin(0.5, 1);
-      const line = this.add.text(0, 8, blurb, textStyle(18, '#ffffff', { align: 'center', wordWrap: { width: 700 } })).setOrigin(0.5, 0);
-      const tag = this.add.text(0, 14 + line.height, kind, textStyle(13, '#97ce4c')).setOrigin(0.5, 0);
-      const w = Math.max(title.width, line.width, 300) + 48;
-      const h = title.height + line.height + tag.height + 40;
-      const bg = this.add.graphics();
-      bg.fillStyle(0x140f1f, 0.92);
-      bg.fillRoundedRect(-w / 2, -title.height - 16, w, h, 14);
-      bg.lineStyle(3, 0xffe27a, 1);
-      bg.strokeRoundedRect(-w / 2, -title.height - 16, w, h, 14);
-      const box = this.add.container(GAME_WIDTH / 2, GAME_HEIGHT - 190, [bg, title, line, tag]).setDepth(55).setScale(0.7).setAlpha(0);
-      this.tweens.add({ targets: box, alpha: 1, scale: 1, duration: 220, ease: 'Back.easeOut' });
-      this.tweens.add({ targets: box, alpha: 0, delay: 2600, duration: 400, onComplete: () => box.destroy() });
+      this.bannerQueue.push({ name, blurb, effect, kind });
+      if (!this.bannerBox) {
+        this.nextBanner();
+        return;
+      }
+      // Another item arrived: let the current banner finish its first moment, then move on.
+      const shown = this.time.now - this.bannerShownAt;
+      this.bannerTimer?.remove(false);
+      this.bannerTimer = this.time.delayedCall(Math.max(0, 1300 - shown), () => this.hideBanner());
     });
+  }
+
+  /** Item banners queue up, so picking up several things at once never stacks them. */
+  private bannerQueue: { name: string; blurb: string; effect: string; kind: string }[] = [];
+  private bannerBox: Phaser.GameObjects.Container | null = null;
+  private bannerShownAt = 0;
+  private bannerTimer: Phaser.Time.TimerEvent | null = null;
+
+  private hideBanner(): void {
+    const box = this.bannerBox;
+    this.bannerBox = null;
+    this.bannerTimer = null;
+    if (box) this.tweens.add({ targets: box, alpha: 0, duration: 200, onComplete: () => box.destroy() });
+    this.time.delayedCall(140, () => this.nextBanner());
+  }
+
+  private nextBanner(): void {
+    const next = this.bannerQueue.shift();
+    if (!next || this.bannerBox) return;
+    const { name, blurb, effect, kind } = next;
+    {
+      const title = this.add.text(0, 0, name, displayStyle(30, '#ffe27a')).setOrigin(0.5, 1);
+      const line = this.add.text(0, 6, blurb, textStyle(15, '#d8d0e6', { align: 'center', wordWrap: { width: 680 } })).setOrigin(0.5, 0);
+      const plain = this.add.text(0, 12 + line.height, effect, textStyle(18, '#b6f07a', { align: 'center', wordWrap: { width: 680 } })).setOrigin(0.5, 0);
+      const tag = this.add.text(0, 18 + line.height + plain.height, kind, textStyle(12, '#8a8199')).setOrigin(0.5, 0);
+      const w = Math.max(title.width, line.width, plain.width, 300) + 40;
+      const h = title.height + line.height + plain.height + tag.height + 38;
+      const bg = this.add.graphics();
+      bg.fillStyle(0x140f1f, 0.9);
+      bg.fillRoundedRect(-w / 2, -title.height - 12, w, h, 14);
+      bg.lineStyle(3, 0xffe27a, 1);
+      bg.strokeRoundedRect(-w / 2, -title.height - 12, w, h, 14);
+      // Low on the screen, just above the hint line, growing upward if the text wraps.
+      const box = this.add.container(GAME_WIDTH / 2, GAME_HEIGHT - 96 - h + title.height + 12, [bg, title, line, plain, tag]).setDepth(55).setScale(0.7).setAlpha(0);
+      this.tweens.add({ targets: box, alpha: 1, scale: 1, duration: 220, ease: 'Back.easeOut' });
+      this.bannerBox = box;
+      this.bannerShownAt = this.time.now;
+      this.bannerTimer = this.time.delayedCall(this.bannerQueue.length ? 1300 : 3200, () => this.hideBanner());
+    }
+  }
+
+  celebrate(title: string, name: string, effect: string, color: number): void {
+    this.whenReady(() => {
+      this.cheerQueue.push({ title, name, effect, color });
+      if (!this.cheering) this.nextCheer();
+    });
+  }
+
+  /** SYNERGY! and TRANSFORMATION! moments play one at a time. */
+  private cheerQueue: { title: string; name: string; effect: string; color: number }[] = [];
+  private cheering = false;
+
+  private nextCheer(): void {
+    const next = this.cheerQueue.shift();
+    if (!next) {
+      this.cheering = false;
+      return;
+    }
+    this.cheering = true;
+    const { title, name, effect, color } = next;
+    const hold = this.cheerQueue.length ? 1500 : 2400;
+    {
+      const hex = `#${color.toString(16).padStart(6, '0')}`;
+      const big = this.add.text(0, -54, title, displayStyle(64, hex)).setOrigin(0.5);
+      const label = this.add.text(0, 6, name, displayStyle(32, '#ffffff')).setOrigin(0.5);
+      const plain = this.add.text(0, 42, effect, textStyle(18, '#ffe27a', { align: 'center', wordWrap: { width: 760 } })).setOrigin(0.5, 0);
+      const strip = this.add.graphics();
+      const h = 150 + plain.height;
+      strip.fillStyle(0x0b0814, 0.85);
+      strip.fillRect(-GAME_WIDTH / 2, -100, GAME_WIDTH, h);
+      strip.fillStyle(color, 1);
+      strip.fillRect(-GAME_WIDTH / 2, -100, GAME_WIDTH, 5);
+      strip.fillRect(-GAME_WIDTH / 2, h - 105, GAME_WIDTH, 5);
+      const box = this.add.container(GAME_WIDTH / 2, GAME_HEIGHT * 0.4, [strip, big, label, plain]).setDepth(62).setAlpha(0);
+      big.setScale(2.2);
+      this.tweens.add({ targets: box, alpha: 1, duration: 160 });
+      this.tweens.add({ targets: big, scale: 1, duration: 360, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: big, angle: { from: -4, to: 4 }, duration: 180, yoyo: true, repeat: 3 });
+      this.tweens.add({ targets: box, alpha: 0, delay: hold, duration: 300, onComplete: () => box.destroy() });
+      this.time.delayedCall(hold + 320, () => this.nextCheer());
+    }
   }
 
   toggleMap(): void {

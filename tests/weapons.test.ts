@@ -72,12 +72,12 @@ describe('story weapons', () => {
     expect(inv.passives).toEqual(['freeze-ray-mod']);
     const withBalls = computeStats(BASE_STATS, itemModifiers(inv, reg.items, reg.synergies), STAT_LIMITS);
     expect(withBalls.bounces).toBe(1);
-    expect(withBalls.freezeChance).toBeGreaterThan(0);
+    expect(withBalls.freezeRate).toBeGreaterThan(0);
     inv.add(item('ricks-spare-ray-gun'));
     const withGun = computeStats(BASE_STATS, itemModifiers(inv, reg.items, reg.synergies), STAT_LIMITS);
     // The bounce belonged to the dodgeballs; the freeze mod works on whatever Morty holds.
     expect(withGun.bounces).toBe(0);
-    expect(withGun.freezeChance).toBe(withBalls.freezeChance);
+    expect(withGun.freezeRate).toBe(withBalls.freezeRate);
   });
 });
 

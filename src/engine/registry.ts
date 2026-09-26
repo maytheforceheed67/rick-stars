@@ -31,6 +31,7 @@ import type {
   SpriteArt,
   StatusDef,
   SynergyDef,
+  TransformationDef,
   UpgradeDef,
 } from './types';
 
@@ -40,6 +41,7 @@ export interface Registry {
   characters: Map<ContentId, CharacterDef>;
   items: Map<ContentId, ItemDef>;
   synergies: SynergyDef[];
+  transformations: TransformationDef[];
   statuses: Map<ContentId, StatusDef>;
   enemies: Map<ContentId, EnemyDef>;
   encounters: Map<ContentId, EncounterDef>;
@@ -70,6 +72,7 @@ export function buildRegistry(listings: EpisodeListing[], shared: EpisodeContent
     characters: new Map(),
     items: new Map(),
     synergies: [],
+    transformations: [],
     statuses: new Map(),
     enemies: new Map(),
     encounters: new Map(),
@@ -123,6 +126,10 @@ export function buildRegistry(listings: EpisodeListing[], shared: EpisodeContent
     c.synergies.forEach((x) => {
       if (reg.synergies.some((s) => s.id === x.id)) errors.push(`Duplicate synergy id "${x.id}"`);
       reg.synergies.push(x);
+    });
+    c.transformations?.forEach((x) => {
+      if (reg.transformations.some((t) => t.id === x.id)) errors.push(`Duplicate transformation id "${x.id}"`);
+      reg.transformations.push(x);
     });
     c.statuses.forEach((x) => put(reg.statuses, x, 'status'));
     c.enemies.forEach((x) => {
@@ -189,6 +196,7 @@ export function validateRegistry(reg: Registry): string[] {
     ...[...reg.characters.values()].map((x) => ['character', x] as [string, ContentMeta]),
     ...[...reg.items.values()].map((x) => ['item', x] as [string, ContentMeta]),
     ...reg.synergies.map((x) => ['synergy', x] as [string, ContentMeta]),
+    ...reg.transformations.map((x) => ['transformation', x] as [string, ContentMeta]),
     ...[...reg.statuses.values()].map((x) => ['status', x] as [string, ContentMeta]),
     ...[...reg.enemies.values()].map((x) => ['enemy', x] as [string, ContentMeta]),
     ...[...reg.encounters.values()].map((x) => ['encounter', x] as [string, ContentMeta]),
@@ -333,10 +341,26 @@ export function validateRegistry(reg: Registry): string[] {
   }
 
   for (const s of reg.synergies) {
-    for (const id of s.requires) if (!reg.items.has(id)) err(`synergy "${s.id}" requires missing item "${id}"`);
+    for (const id of s.requires) {
+      const item = reg.items.get(id);
+      if (!item) err(`synergy "${s.id}" requires missing item "${id}"`);
+      else if (item.kind === 'consumable') err(`synergy "${s.id}" requires consumable "${id}", which is never held`);
+    }
     if (s.requires.length < 2) err(`synergy "${s.id}" needs at least two items`);
   }
+  for (const t of reg.transformations) {
+    for (const id of t.set) {
+      const item = reg.items.get(id);
+      if (!item) err(`transformation "${t.id}" lists missing item "${id}"`);
+      else if (item.kind === 'consumable' || item.kind === 'weapon') err(`transformation "${t.id}" lists "${id}", which never counts (only passives and actives do)`);
+    }
+    const need = t.count ?? 3;
+    if (need < 2 || need > t.set.length) err(`transformation "${t.id}" needs ${need} of ${t.set.length} items`);
+    if (t.look.accessory && !reg.sprites.has(t.look.accessory)) err(`transformation "${t.id}": accessory "${t.look.accessory}" doesn't exist`);
+  }
   for (const item of reg.items.values()) {
+    if (item.companion && !reg.sprites.has(item.companion.art)) err(`item "${item.id}": companion art "${item.companion.art}" doesn't exist`);
+    if (item.look?.accessory && !reg.sprites.has(item.look.accessory)) err(`item "${item.id}": accessory "${item.look.accessory}" doesn't exist`);
     if (item.kind === 'active' && !item.active) err(`item "${item.id}" is active but has no active use`);
     if (item.kind === 'consumable' && !item.consumable) err(`item "${item.id}" is a consumable but has no use`);
     if (item.kind === 'weapon' && !item.weapon) err(`item "${item.id}" is a weapon but has no weapon spec`);

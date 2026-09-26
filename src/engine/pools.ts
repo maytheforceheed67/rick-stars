@@ -5,6 +5,8 @@ import type { ActDef, ContentId, EpisodeId, ItemDef, Weighted } from './types';
 export interface ItemFilter {
   rarity?: ItemDef['rarity'];
   kind?: ItemDef['kind'];
+  /** Any of these kinds. */
+  kinds?: readonly ItemDef['kind'][];
   /** Ids to leave out, e.g. what a shop has already stocked. */
   exclude?: readonly ContentId[];
 }
@@ -30,6 +32,7 @@ export function itemPoolFor(
     if (item.locked && !unlocked.has(id)) return;
     if (filter.rarity && item.rarity !== filter.rarity) return;
     if (filter.kind && item.kind !== filter.kind) return;
+    if (filter.kinds && !filter.kinds.includes(item.kind)) return;
     if (filter.exclude?.includes(id)) return;
     out.set(id, (out.get(id) ?? 0) + weight);
   };

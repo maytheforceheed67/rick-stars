@@ -1,4 +1,4 @@
-import type { ContentId, ItemDef, ItemHooks, SynergyDef, WeaponSpec } from '../types';
+import type { ContentId, ItemDef, ItemHooks, SynergyDef, TransformationDef, WeaponSpec } from '../types';
 import type { Inventory } from './inventory';
 import type { StatModifiers } from './stats';
 
@@ -8,16 +8,23 @@ export function activeSynergies(owned: Iterable<ContentId>, synergies: readonly 
   return synergies.filter((s) => s.requires.every((id) => set.has(id)));
 }
 
+/** Transformations Morty qualifies for: he holds enough items from the set. */
+export function activeTransformations(owned: Iterable<ContentId>, transformations: readonly TransformationDef[]): TransformationDef[] {
+  const set = new Set(owned);
+  return transformations.filter((t) => t.set.filter((id) => set.has(id)).length >= (t.count ?? 3));
+}
+
 export interface HookSource {
   id: ContentId;
   hooks?: ItemHooks;
 }
 
-/** Owned items in pickup order, then active synergies. */
+/** Owned items in pickup order, then active synergies, then transformations. */
 export function hookSources(
   inventory: Inventory,
   items: ReadonlyMap<ContentId, ItemDef>,
   synergies: readonly SynergyDef[],
+  transformations: readonly TransformationDef[] = [],
 ): HookSource[] {
   const owned = inventory.owned();
   const out: HookSource[] = [];
@@ -26,6 +33,7 @@ export function hookSources(
     if (def?.hooks) out.push({ id, hooks: def.hooks });
   }
   for (const s of activeSynergies(owned, synergies)) if (s.hooks) out.push({ id: s.id, hooks: s.hooks });
+  for (const t of activeTransformations(owned, transformations)) if (t.hooks) out.push({ id: t.id, hooks: t.hooks });
   return out;
 }
 
@@ -54,11 +62,12 @@ export function weaponModifiers(w: WeaponSpec | undefined): StatModifiers | unde
   };
 }
 
-/** Stat modifiers from owned items (including the weapon) and active synergies. */
+/** Stat modifiers from owned items (including the weapon), active synergies and transformations. */
 export function itemModifiers(
   inventory: Inventory,
   items: ReadonlyMap<ContentId, ItemDef>,
   synergies: readonly SynergyDef[],
+  transformations: readonly TransformationDef[] = [],
 ): StatModifiers[] {
   const owned = inventory.owned();
   const out: StatModifiers[] = [];
@@ -70,5 +79,6 @@ export function itemModifiers(
     if (w) out.push(w);
   }
   for (const s of activeSynergies(owned, synergies)) if (s.stats) out.push(s.stats);
+  for (const t of activeTransformations(owned, transformations)) if (t.stats) out.push(t.stats);
   return out;
 }

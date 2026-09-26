@@ -132,6 +132,62 @@ export interface StatusDef extends ContentMeta {
 export type ItemKind = 'passive' | 'active' | 'consumable' | 'weapon';
 export type Rarity = 'common' | 'rare' | 'story';
 
+/**
+ * What an item changes, so the rules every item follows can be checked (tests/items.test.ts).
+ * A passive must change what Morty does or what he sees: a plain 'stat' item only counts when
+ * its changes are big (ITEM_RULES in balance.ts).
+ */
+export type ItemEffect =
+  /** How shots behave: pierce, homing, split, bounce, blast, chain, orbit, charge, crits. */
+  | 'shots'
+  /** A companion that fights or helps. */
+  | 'companion'
+  /** A visible effect when a shot hits, something dies, Morty dashes or gets hurt. */
+  | 'on-hit'
+  | 'on-kill'
+  | 'on-dash'
+  | 'on-hurt'
+  /** Changes how Morty or his shots look. */
+  | 'look'
+  /** Runs an episode mechanic (the grappling shoes). */
+  | 'mechanic'
+  /** Plain stat changes. */
+  | 'stat'
+  /** Actives: changes the whole room (clears bullets, freezes everything, summons help). */
+  | 'room'
+  /** Consumables. */
+  | 'heal'
+  | 'status';
+
+/** How holding an item (or a transformation) changes the way Morty and his shots look. */
+export interface LookSpec {
+  /** Recolors his shirt. */
+  shirt?: number;
+  /** Something he wears, drawn over his sprite (a sprite key), nudged `dy` pixels from his head. */
+  accessory?: string;
+  dy?: number;
+  /** A sparkly trail behind him while he moves. */
+  trail?: number;
+  /** The halo color of his shots. */
+  glow?: number;
+}
+
+/** A buddy that follows Morty while he holds the item. */
+export interface CompanionSpec {
+  /** World sprite key. */
+  art: string;
+  /**
+   * 'shooter' fires at the nearest enemy; 'pouncer' leaps onto enemies and bites; 'guard' circles
+   * Morty and eats enemy bullets.
+   */
+  kind: 'shooter' | 'pouncer' | 'guard';
+  /** Seconds between attacks (the companionRate stat speeds it up). */
+  every: number;
+  /** Damage per attack, as a share of Morty's shot damage. */
+  damage: number;
+  flying?: boolean;
+}
+
 export interface WeaponSpec {
   /** Multiplies damage from stats. */
   damageMult: number;
@@ -162,6 +218,10 @@ export interface ItemDef extends ContentMeta {
   name: string;
   /** One-line funny description shown on pickup. */
   blurb: string;
+  /** One plain line saying exactly what it does ("Shots pierce one enemy"). */
+  effect: string;
+  /** What it changes (see ItemEffect). */
+  tags: ItemEffect[];
   kind: ItemKind;
   rarity: Rarity;
   /** Base shop price in Scrap. */
@@ -172,6 +232,10 @@ export interface ItemDef extends ContentMeta {
   active?: { recharge: number; use(ctx: GameCtx): boolean | void };
   consumable?: { use(ctx: GameCtx): boolean | void };
   weapon?: WeaponSpec;
+  /** A buddy that follows Morty while he holds this. */
+  companion?: CompanionSpec;
+  /** How holding it changes Morty or his shots. */
+  look?: LookSpec;
   icon: IconDraw;
   /** Can't drop until unlocked (garage upgrade or an episode clear). */
   locked?: boolean;
@@ -179,7 +243,7 @@ export interface ItemDef extends ContentMeta {
   noPool?: boolean;
 }
 
-export type HitSource = 'shot' | 'slash' | 'explosion' | 'shard' | 'poison' | 'rick' | 'hazard';
+export type HitSource = 'shot' | 'slash' | 'explosion' | 'shard' | 'poison' | 'rick' | 'hazard' | 'zap' | 'orbit' | 'companion';
 
 export interface HitInfo {
   source: HitSource;
@@ -188,8 +252,10 @@ export interface HitInfo {
   tag?: string;
   wasFrozen: boolean;
   killed: boolean;
-  /** Shots only: the shot bounced off a wall before hitting. */
+  /** Shots only: the shot bounced off a wall (or ricocheted off an enemy) before hitting. */
   bounced?: boolean;
+  /** Shots only: a critical hit (critRate). */
+  crit?: boolean;
 }
 
 export interface ShotInfo {
@@ -207,13 +273,34 @@ export interface ItemHooks {
   /** The dashing player passed through an enemy (once per enemy per dash). */
   onDashContact?(ctx: GameCtx, enemy: EnemyRef): void;
   onRoomClear?(ctx: GameCtx): void;
+  /** Morty used his active item. */
+  onUseActive?(ctx: GameCtx, itemId: ContentId): void;
 }
 
 export interface SynergyDef extends ContentMeta {
   name: string;
   blurb: string;
+  /** One plain line saying exactly what it adds. */
+  effect: string;
   /** Active while the player holds every one of these items. */
   requires: ContentId[];
+  stats?: StatModifiers;
+  hooks?: ItemHooks;
+}
+
+/**
+ * Holding any `count` items from a themed set transforms Morty: a new look and a strong bonus
+ * ("Garage Tinkerer").
+ */
+export interface TransformationDef extends ContentMeta {
+  name: string;
+  blurb: string;
+  /** One plain line saying exactly what it does. */
+  effect: string;
+  set: ContentId[];
+  /** How many of the set it takes (default 3). */
+  count?: number;
+  look: LookSpec;
   stats?: StatModifiers;
   hooks?: ItemHooks;
 }
@@ -252,6 +339,10 @@ export interface EnemyRef {
   readonly frozen: boolean;
   readonly elite: boolean;
   readonly passive: boolean;
+  readonly poisoned: boolean;
+  readonly stunned: boolean;
+  /** Slowed down (a Customs Stamp, a hall monitor's whistle). */
+  readonly slowed: boolean;
 }
 
 export interface ToastOptions {
@@ -271,6 +362,8 @@ export interface ExplosionSpec {
   playerDamage?: number;
   tag?: string;
   color?: number;
+  /** A little pop (a stomp, an acid splash) instead of a full explosion: less shake and fire. */
+  small?: boolean;
 }
 
 export interface PlayerShotSpec {
@@ -278,6 +371,15 @@ export interface PlayerShotSpec {
   y: number;
   angle: number;
   damage: number;
+  /** Sprite key (default: an energy bolt tinted `color`). */
+  texture?: string;
+  /** Degrees per second the sprite spins (0 = points along its path). */
+  spin?: number;
+  /** Stays upright, facing left or right (critters running). */
+  upright?: boolean;
+  /** Enemies it passes through, and how hard it homes in (radians per second). */
+  pierce?: number;
+  homing?: number;
   speed?: number;
   radius?: number;
   color?: number;
@@ -325,7 +427,20 @@ export interface GameCtx {
   flash(color: number, ms: number): void;
   /** Shows a temporary pulsing sprite (e.g. a lit bomb) for a few seconds. */
   marker(art: string, x: number, y: number, seconds: number): void;
+  /** A purely visual effect: particles, a ring, a lightning zap, a slash, a word. */
+  vfx(spec: VfxSpec): void;
+  /** Removes every enemy bullet in the room and returns how many there were. */
+  clearEnemyShots(): number;
+  /** Shoves enemies within `radius` of (x, y) away from it. */
+  pushEnemies(x: number, y: number, radius: number, force: number): void;
 }
+
+export type VfxSpec =
+  | { kind: 'burst'; style: 'hit' | 'death' | 'ice' | 'scrap' | 'slime' | 'paper' | 'portal' | 'smoke' | 'spark' | 'heal' | 'fire' | 'confetti'; x: number; y: number; count?: number }
+  | { kind: 'ring'; x: number; y: number; color: number; radius: number }
+  | { kind: 'zap'; from: Vec; to: Vec; color?: number }
+  | { kind: 'slash'; x: number; y: number; angle: number; color?: number }
+  | { kind: 'text'; x: number; y: number; text: string; color?: string };
 
 // ---------------------------------------------------------------------------------------------
 // Enemies and bosses
@@ -898,6 +1013,8 @@ export interface EpisodeContent {
   mechanics: MechanicDef[];
   gadgets: GadgetDef[];
   pickups: PickupDef[];
+  /** Themed item sets that transform Morty (optional). */
+  transformations?: TransformationDef[];
   cutscenes: CutsceneDef[];
   backdrops: BackdropDef[];
   templates: RoomTemplate[];

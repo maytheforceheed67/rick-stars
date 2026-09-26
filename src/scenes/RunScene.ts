@@ -4,11 +4,12 @@
  * The engine never special-cases an episode: everything episode-specific comes in as content.
  */
 import Phaser from 'phaser';
-import { BASE_STATS, ECONOMY, ENEMIES, PLAYER, RICK_METER, ROOMS, STAT_LIMITS } from '../content/balance';
+import { BASE_STATS, ECONOMY, ENEMIES, PLAYER, RICK_METER, ROOMS, SHOTS, STAT_LIMITS } from '../content/balance';
+import { bakeArt, TEXTURE_PAD } from '../engine/art/textures';
 import { GAME_HEIGHT, GAME_WIDTH, HUD_HEIGHT, TILE } from '../engine/constants';
 import { buildFixedFloor, generateFloor, type FloorConfig, type FloorRoom } from '../engine/dungeon/generate';
 import { DIR_VEC, doorCell, OPPOSITE, type Dir, type ParsedTemplate } from '../engine/dungeon/templates';
-import { activeSynergies, hookSources, itemModifiers, runHook, type HookSource } from '../engine/effects/hooks';
+import { activeSynergies, activeTransformations, hookSources, itemModifiers, runHook, type HookSource } from '../engine/effects/hooks';
 import { computeStats, type StatBlock, type StatModifiers } from '../engine/effects/stats';
 import type { StatusChange } from '../engine/effects/status';
 import { nextUp } from '../engine/episodes';
@@ -16,10 +17,11 @@ import { enemyPoolFor, itemPoolFor, type ItemFilter } from '../engine/pools';
 import type { Registry } from '../engine/registry';
 import type { Rng } from '../engine/rng';
 import { freshRoomState, RunState, type PedestalState, type RoomState } from '../engine/run/RunState';
+import { Companion, Orbiters, type CompanionHost } from '../engine/runtime/Companion';
 import { Enemy, type EnemyHost, type SpawnOpts } from '../engine/runtime/Enemy';
 import { Fx, type BurstStyle } from '../engine/runtime/Fx';
 import { Player, type PlayerHost, type PlayerInput } from '../engine/runtime/Player';
-import { ProjectilePool } from '../engine/runtime/Projectiles';
+import { ProjectilePool, type Projectile } from '../engine/runtime/Projectiles';
 import { RoomView, type DoorSpec } from '../engine/runtime/RoomView';
 import { readTime, Stage } from '../engine/runtime/Stage';
 import { HazardLayer, TelegraphLayer } from '../engine/runtime/Telegraphs';
@@ -41,6 +43,7 @@ import type {
   HitInfo,
   HitSource,
   ItemDef,
+  LookSpec,
   MechanicApi,
   MechanicDef,
   MechanicInstance,
@@ -54,7 +57,9 @@ import type {
   StatusFlags,
   StoryWeapon,
   TileKind,
+  TransformationDef,
   Vec,
+  VfxSpec,
 } from '../engine/types';
 import type { HudApi, HudModel } from '../engine/ui/hudModel';
 import { installDebug } from '../debug/debug';
@@ -168,6 +173,23 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private lockedBeforeScene = false;
   /** Run time when the act's story weapon changes hands (0 = nothing pending). */
   private weaponDue = 0;
+  /** Buddies from items, and the junk circling Morty. */
+  private companions: Companion[] = [];
+  private orbiters: Orbiters | null = null;
+  /** Build-ups toward the next critical hit and freeze bolt (critRate, freezeRate). */
+  private critAcc = 0;
+  private freezeAcc = 0;
+  /** Run time of the last volley, for charged shots. */
+  private lastFireAt = 0;
+  private chargeAnnounced = false;
+  private chargeRing: Phaser.GameObjects.Arc | null = null;
+  /** What Morty looks like right now (items and transformations), and its pieces. */
+  private lookKey = '';
+  private look: LookSpec = {};
+  private accessory: Phaser.GameObjects.Image | null = null;
+  private trailTimer = 0;
+  /** The transformation Morty is in, if any. */
+  private transformation: TransformationDef | null = null;
   /** Counts shots fired, to cycle through a thrown weapon's looks. */
   private shotsFired = 0;
   private readonly playerAnchor = () => ({ x: this.player.x, y: this.player.y - 48 });
@@ -212,6 +234,18 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.interactable = null;
     this.pendingSwap = null;
     this.weaponDue = 0;
+    this.companions = [];
+    this.orbiters = null;
+    this.critAcc = 0;
+    this.freezeAcc = 0;
+    this.lastFireAt = 0;
+    this.chargeAnnounced = false;
+    this.chargeRing = null;
+    this.lookKey = '';
+    this.look = {};
+    this.accessory = null;
+    this.trailTimer = 0;
+    this.transformation = null;
     this.camKick = { x: 0, y: 0 };
     this.camRest = null;
     this.timeFactor = 1;
@@ -258,6 +292,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.objects = new WorldObjects(this);
     this.player = new Player(this, this, this.playerTexture(), 0, 0);
     this.stage = this.makeStage();
+    this.orbiters = new Orbiters(this.companionHost());
     this.ctx = this.buildCtx();
     this.setupInput();
 
@@ -272,6 +307,13 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   private cleanup(): void {
     // Phaser tears down this scene's objects itself; this just releases what it doesn't know about.
+    this.companions.forEach((c) => c.destroy());
+    this.companions = [];
+    this.orbiters?.destroy();
+    this.accessory?.destroy();
+    this.accessory = null;
+    this.chargeRing?.destroy();
+    this.chargeRing = null;
     this.timeFactor = 1;
     this.tweens.timeScale = 1;
     if (this.physics?.world) this.physics.world.timeScale = 1;
@@ -349,7 +391,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       const inv = this.run.inventory;
       const s = computeStats(
         BASE_STATS,
-        [...itemModifiers(inv, this.reg.items, this.reg.synergies), ...this.run.statuses.modifiers(), ...this.upgradeMods],
+        [...itemModifiers(inv, this.reg.items, this.reg.synergies, this.reg.transformations), ...this.run.statuses.modifiers(), ...this.upgradeMods],
         STAT_LIMITS,
       );
       this.statsCache = s;
@@ -362,7 +404,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   }
 
   private sources(): HookSource[] {
-    if (!this.sourcesCache) this.sourcesCache = hookSources(this.run.inventory, this.reg.items, this.reg.synergies);
+    if (!this.sourcesCache) this.sourcesCache = hookSources(this.run.inventory, this.reg.items, this.reg.synergies, this.reg.transformations);
     return this.sourcesCache;
   }
 
@@ -375,6 +417,12 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private playerTexture(): string {
     const ch = this.reg.characters.get(this.run.act.playable);
     const key = ch?.sprite?.key ?? 'morty';
+    // An item or transformation look beats the Garage shirt.
+    if (this.look.shirt !== undefined && ch?.recolor) {
+      const k = `${key}-look-${this.look.shirt.toString(16)}`;
+      if (!this.textures.exists(k)) bakeArt(this, ch.recolor(this.look.shirt, k));
+      return k;
+    }
     const shirt = svc().save.shirt;
     if (shirt && this.textures.exists(`${key}-${shirt}`)) return `${key}-${shirt}`;
     return key;
@@ -429,7 +477,138 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       shake: (i, ms) => this.fx.shake(i, ms),
       flash: (c, ms) => this.fx.flash(c, ms),
       marker: (art, x, y, seconds) => this.showMarker(art, x, y, seconds),
+      vfx: (spec) => this.vfx(spec),
+      clearEnemyShots: () => {
+        let n = 0;
+        this.enemyShots.forEachActive((p) => {
+          this.fx.burst('spark', p.x, p.y, 2);
+          p.kill();
+          n++;
+        });
+        return n;
+      },
+      pushEnemies: (x, y, radius, force) => {
+        for (const e of this.enemies) {
+          if (this.isTarget(e) && Math.hypot(e.x - x, e.y - y) < radius + e.radius) e.knock(Math.atan2(e.y - y, e.x - x), force);
+        }
+      },
     };
+  }
+
+  private vfx(spec: VfxSpec): void {
+    switch (spec.kind) {
+      case 'burst':
+        this.fx.burst(spec.style, spec.x, spec.y, spec.count);
+        return;
+      case 'ring':
+        this.fx.ring(spec.x, spec.y, spec.color, spec.radius, 320, 4);
+        return;
+      case 'zap':
+        this.fx.zap(spec.from, spec.to, spec.color);
+        return;
+      case 'slash':
+        this.fx.slash(spec.x, spec.y, spec.angle, spec.color);
+        return;
+      case 'text':
+        this.fx.floatText(spec.x, spec.y, spec.text, spec.color ?? '#ffffff', 20);
+        return;
+    }
+  }
+
+  // ---- companions, orbiting junk, charged shots and looks ------------------------------------
+
+  private companionHost(): CompanionHost {
+    return {
+      scene: this,
+      playerPos: () => ({ x: this.player.x, y: this.player.y }),
+      nearestEnemy: (from, range) => this.nearestTarget(from, range, true),
+      targets: () => this.enemies.filter((e) => this.isTarget(e) && e.spawnLeft <= 0),
+      shoot: (from, angle, damage, color) =>
+        this.playerShots.spawn({ x: from.x, y: from.y, angle, speed: 560, damage, radius: 6, life: 0.8, texture: 'shot-player', tint: color, glow: color, source: 'companion' }),
+      hit: (e, damage, source, angle) => this.hitEnemy(e, damage, { source, angle }),
+      eatShots: (at, radius) => this.eatEnemyShots(at, radius),
+      shotDamage: () => this.stats().damage,
+      rate: () => this.stats().companionRate,
+      sfx: (id) => this.sfx(id),
+      burst: (style, x, y, count) => this.fx.burst(style, x, y, count),
+    };
+  }
+
+  /** Keeps the buddies in step with what Morty holds. */
+  private syncCompanions(): void {
+    const owned = this.run.inventory.owned();
+    this.companions = this.companions.filter((c) => {
+      if (owned.includes(c.itemId)) return true;
+      c.destroy();
+      return false;
+    });
+    for (const id of owned) {
+      const spec = this.reg.items.get(id)?.companion;
+      if (!spec || this.companions.some((c) => c.itemId === id)) continue;
+      const c = new Companion(this.companionHost(), id, spec, this.companions.length);
+      this.companions.push(c);
+      this.fx.burst('portal', c.img.x, c.img.y, 10);
+    }
+  }
+
+  /** Morty's look: the latest item's look for each piece, with a transformation's look on top. */
+  private refreshLook(): void {
+    const owned = this.run.inventory.owned();
+    const look: LookSpec = {};
+    for (const id of owned) {
+      const l = this.reg.items.get(id)?.look;
+      if (l) Object.assign(look, l);
+    }
+    this.transformation = activeTransformations(owned, this.reg.transformations)[0] ?? null;
+    if (this.transformation) Object.assign(look, this.transformation.look);
+    this.look = look;
+    const key = JSON.stringify(look);
+    if (key === this.lookKey) return;
+    this.lookKey = key;
+    this.player.setTexture(this.playerTexture());
+    this.accessory?.destroy();
+    this.accessory = look.accessory && this.textures.exists(look.accessory) ? this.add.image(0, 0, look.accessory) : null;
+  }
+
+  /** Per frame: buddies, orbiting junk, the charged-shot glow, the accessory, the trail, dash erasing. */
+  private updateGear(dt: number): void {
+    const st = this.stats();
+    const p = this.player;
+    for (const c of this.companions) c.update(dt);
+    this.orbiters?.update(dt, st.orbit);
+    if (p.isDashing && st.dashEraseShots > 0) {
+      const n = this.eatEnemyShots(p, st.dashEraseShots);
+      if (n) {
+        this.fx.burst('paper', p.x, p.y - 10, Math.min(12, n * 3));
+        this.sfx('spark');
+      }
+    }
+    // A glow around Morty when his next shot is charged.
+    const ready = st.chargeShot > 0 && !!this.run.inventory.weapon && this.run.time - this.lastFireAt >= st.chargeShot;
+    if (ready && !this.chargeAnnounced) {
+      this.chargeAnnounced = true;
+      this.sfx('charge-ready');
+    }
+    if (ready) {
+      this.chargeRing ??= this.add.circle(p.x, p.y, 26, 0xfff2a8, 0).setStrokeStyle(3, 0xfff2a8, 0.9).setDepth(p.sprite.depth - 1);
+      this.chargeRing.setPosition(p.x, p.y - 8).setScale(1 + 0.1 * Math.sin(this.run.time * 12)).setDepth(p.sprite.depth - 1);
+    } else if (this.chargeRing) {
+      this.chargeRing.destroy();
+      this.chargeRing = null;
+    }
+    const s = p.sprite;
+    if (this.accessory) {
+      const top = s.y - s.displayHeight * s.originY + TEXTURE_PAD;
+      this.accessory.setPosition(s.x, top + (this.look.dy ?? 0)).setDepth(s.depth + 1).setFlipX(s.flipX).setAlpha(s.alpha).setVisible(p.falling <= 0);
+    }
+    if (this.look.trail !== undefined && p.moving) {
+      this.trailTimer -= dt;
+      if (this.trailTimer <= 0) {
+        this.trailTimer = 0.07;
+        const wobble = Math.sin(this.run.time * 37) * 8;
+        this.fx.pop(s.x + wobble, s.y + 10, 'fx-dot', this.look.trail, 0.8, 0.1, 450);
+      }
+    }
   }
 
   private showMarker(art: string, x: number, y: number, seconds: number): void {
@@ -555,6 +734,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     if (!this.roomView || this.ended) return;
     if (this.dead) return;
     this.player.update(dt, input);
+    this.updateGear(dt);
     this.checkTiles();
     for (const m of this.mechanics) m.inst.update?.(dt);
     this.script?.update?.(dt);
@@ -575,6 +755,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.roomView,
       () => this.sfx('bounce'),
       (p, wall) => wall && this.fx.burst('hit', p.x, p.y, 3),
+      (p) => this.homingTarget(p),
     );
     this.checkPlayerShots();
     this.enemyShots.update(
@@ -779,6 +960,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.player.setPosition(pos.x, pos.y);
     this.player.dashLeft = 0;
     this.lastSafe = { ...pos };
+    this.companions.forEach((c) => c.reposition());
     this.setupCamera(view);
 
     this.restoreContents(st);
@@ -1265,14 +1447,28 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.nextWave();
   }
 
+  /** Treasure rooms offer a choice of two: one of them rare when the pool has any. */
   private stockTreasure(st: RoomState): void {
     if (st.stocked) return;
     st.stocked = true;
-    const at = this.roomInfoObj!.markers('I')[0] ?? { x: this.roomView!.widthPx / 2, y: this.roomView!.heightPx / 2 };
-    const rare = this.run.play.chance(0.3);
-    const id = this.randomItem(rare ? { rarity: 'rare' } : {}) ?? this.randomItem({});
-    if (id) this.placeWare({ itemId: id, x: at.x, y: at.y });
-    else for (let i = 0; i < 5; i++) this.spawnPickupAt('scrap', at.x, at.y, true);
+    const view = this.roomView!;
+    const at = this.roomInfoObj!.markers('I')[0] ?? { x: view.widthPx / 2, y: view.heightPx / 2 };
+    const held: ContentId[] = [];
+    const first = this.randomItem({ rarity: 'rare', kinds: ['passive', 'active'] }) ?? this.randomItem({ kinds: ['passive', 'active'] });
+    if (first) held.push(first);
+    const second = this.randomItem({ kinds: ['passive', 'active'], exclude: held });
+    if (second) held.push(second);
+    if (!held.length) {
+      for (let i = 0; i < 5; i++) this.spawnPickupAt('scrap', at.x, at.y, true);
+      return;
+    }
+    if (held.length === 1) {
+      this.placeWare({ itemId: held[0], x: at.x, y: at.y });
+      return;
+    }
+    // Side by side, a step and a half apart (closer if that's off the floor).
+    const gap = [TILE * 1.5, TILE].find((g) => view.tileAt(at.x - g, at.y) === 'floor' && view.tileAt(at.x + g, at.y) === 'floor') ?? TILE;
+    held.forEach((id, i) => this.placeWare({ itemId: id, x: at.x + (i ? gap : -gap), y: at.y, group: `treasure-${this.run.currentRoom}` }));
   }
 
   private stockShop(st: RoomState, firstVisit: boolean): void {
@@ -1300,7 +1496,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     // The shop's staple is reserved first, so no random roll can put a second one on the shelf.
     const staple = act.shop?.alwaysStocks?.find((id) => this.reg.items.has(id));
     if (staple) taken.push(staple);
-    stock(this.randomItem({ exclude: taken }));
+    // One good item (a passive or an active, rare half the time), then consumables.
+    const rare = this.run.play.chance(0.5);
+    stock((rare ? this.randomItem({ rarity: 'rare', kinds: ['passive', 'active'], exclude: taken }) : null) ?? this.randomItem({ kinds: ['passive', 'active'], exclude: taken }));
     stock(staple ?? this.randomItem({ kind: 'consumable', exclude: taken }));
     wares.push({ pickup: this.reg.pickups.get('heart-full') });
     const extra = this.run.play.chance(0.6) ? this.randomItem({ kind: 'consumable', exclude: taken }) : null;
@@ -1556,6 +1754,17 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const p = this.player;
     const thrown = w.style === 'thrown';
     const looks = typeof w.shot === 'string' ? [w.shot] : (w.shot ?? ['shot-player']);
+    // Crits and freeze bolts come around on a steady count, never by luck.
+    this.critAcc += st.critRate;
+    const crit = this.critAcc >= 1;
+    if (crit) this.critAcc -= 1;
+    this.freezeAcc += st.freezeRate;
+    const freezes = this.freezeAcc >= 1;
+    if (freezes) this.freezeAcc -= 1;
+    const charged = st.chargeShot > 0 && this.run.time - this.lastFireAt >= st.chargeShot;
+    this.lastFireAt = this.run.time;
+    this.chargeAnnounced = false;
+    const glow = freezes ? 0xbfeaff : crit ? 0xffd54a : charged ? 0xfff2a8 : (this.look.glow ?? w.color);
     for (let i = 0; i < n; i++) {
       const a = n > 1 ? angle - spread / 2 + (spread * i) / (n - 1) : angle;
       this.playerShots.spawn({
@@ -1563,20 +1772,32 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
         y: p.y + Math.sin(a) * 18 - 6,
         angle: a,
         speed: st.shotSpeed,
-        damage: st.damage,
-        radius: st.shotSize,
+        damage: st.damage * (crit ? SHOTS.critMult : 1) * (charged ? SHOTS.chargeMult : 1),
+        radius: st.shotSize * (charged ? SHOTS.chargeSize : 1) * (crit ? 1.25 : 1),
         life: st.range / st.shotSpeed,
         bounces: Math.round(st.bounces),
         // Junk cycles through its pile in order, so the look never touches the gameplay RNG.
-        texture: looks[this.shotsFired++ % looks.length],
-        tint: thrown ? undefined : w.color,
-        glow: w.color,
-        spin: w.spin,
+        texture: freezes ? 'shot-ice' : looks[this.shotsFired++ % looks.length],
+        tint: freezes || thrown ? undefined : crit ? 0xffd54a : w.color,
+        glow,
+        spin: freezes ? 0 : w.spin,
         source: 'shot',
+        pierce: Math.round(st.pierce) + (charged ? SHOTS.chargePierce : 0),
+        homing: st.homing,
+        split: Math.round(st.split),
+        blast: st.blast,
+        chain: Math.round(st.chain),
+        ricochet: Math.round(st.ricochet),
+        crit,
+        freezes,
+        charged,
       });
     }
-    this.sfx(w.sfx ?? (w.damageMult > 1.2 ? 'shoot-heavy' : 'shoot'));
-    if (thrown) {
+    this.sfx(charged ? 'charge-shot' : (w.sfx ?? (w.damageMult > 1.2 ? 'shoot-heavy' : 'shoot')));
+    if (charged) {
+      this.fx.pop(p.x + Math.cos(angle) * 26, p.y + Math.sin(angle) * 26 - 6, 'fx-star', 0xfff2a8, 1, 3.2, 200, angle);
+      this.kickCamera(angle + Math.PI, 5);
+    } else if (thrown) {
       // A throw: a little whoosh off his hand and a lighter kick than a gun.
       this.fx.pop(p.x + Math.cos(angle) * 22, p.y + Math.sin(angle) * 22 - 6, 'fx-puff', 0xffffff, 0.3, 1, 130);
       this.kickCamera(angle + Math.PI, 1.2);
@@ -1602,6 +1823,15 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       return;
     }
     const run = this.run;
+    const dodge = this.stats().dodgeChance;
+    if (!opts?.ignoreInvulnerability && dodge > 0 && run.play.chance(dodge)) {
+      // Slipped right past it.
+      p.iframes = Math.max(p.iframes, 0.5);
+      this.fx.floatText(p.x, p.y - 64, 'MISSED!', '#ffd54a', 18);
+      this.fx.pop(p.x, p.y - 20, 'fx-star', 0xffd54a, 0.8, 2.4, 260);
+      this.sfx('whiff');
+      return;
+    }
     run.hp -= halves;
     run.lastDamageSource = source;
     run.stats.damageTaken += halves;
@@ -1707,6 +1937,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   private spawnPlayerShot(spec: PlayerShotSpec): void {
     const ice = spec.source === 'shard';
+    const custom = spec.texture !== undefined && this.textures.exists(spec.texture);
     this.playerShots.spawn({
       x: spec.x,
       y: spec.y,
@@ -1715,19 +1946,26 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       damage: spec.damage,
       radius: spec.radius ?? 7,
       life: spec.life ?? 0.7,
-      texture: ice ? 'shot-ice' : 'shot-player',
-      tint: ice ? undefined : (spec.color ?? 0x97ce4c),
+      texture: custom ? spec.texture! : ice ? 'shot-ice' : 'shot-player',
+      // Content sprites keep their own colors; energy bolts take the tint.
+      tint: ice || custom ? undefined : (spec.color ?? 0x97ce4c),
+      glow: spec.color,
+      spin: spec.spin,
+      upright: spec.upright,
       source: spec.source ?? 'shot',
       tag: spec.tag,
+      pierce: spec.pierce,
+      homing: spec.homing,
     });
   }
 
   private checkPlayerShots(): void {
     this.playerShots.forEachActive((p) => {
       for (const e of this.enemies) {
-        if (!this.isTarget(e) || e.spawnLeft > 0) continue;
+        if (!p.active) return;
+        if (!this.isTarget(e) || e.spawnLeft > 0 || p.hits.has(e.uid)) continue;
         if (Math.hypot(p.x - e.x, p.y - e.y) > p.radius + e.radius) continue;
-        if (e.def.shieldArc && !e.frozen) {
+        if (e.def.shieldArc && !e.frozen && !p.charged) {
           const from = Math.atan2(p.y - e.y, p.x - e.x);
           const facing = (e.memory.facing as number | undefined) ?? Math.atan2(this.player.y - e.y, this.player.x - e.x);
           const diff = Math.abs(Math.atan2(Math.sin(from - facing), Math.cos(from - facing)));
@@ -1738,13 +1976,149 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
             return;
           }
         }
-        this.hitEnemy(e, p.damage, { source: p.source, tag: p.tag, bounced: p.bounced, angle: Math.atan2(p.vy, p.vx) });
-        this.fx.burst('spark', p.x, p.y, 5);
-        this.fx.ring(p.x, p.y, 0xfff2a8, 16, 150);
-        p.kill();
-        return;
+        this.shotHits(p, e);
       }
     });
+  }
+
+  /** A player shot connects: the damage, then whatever the shot does on impact. */
+  private shotHits(p: Projectile, e: Enemy): void {
+    p.hits.add(e.uid);
+    const angle = Math.atan2(p.vy, p.vx);
+    this.hitEnemy(e, p.damage, { source: p.source, tag: p.tag, bounced: p.bounced, angle, crit: p.crit });
+    this.fx.burst('spark', p.x, p.y, 5);
+    this.fx.ring(p.x, p.y, 0xfff2a8, 16, 150);
+    if (p.crit) {
+      this.fx.floatText(e.x, e.y - e.displayHeight * e.originY - 8, 'CRIT!', '#ffd54a', 22);
+      this.fx.ring(p.x, p.y, 0xffd54a, 44, 240, 4);
+      this.sfx('crit');
+    }
+    if (p.freezes && e.alive && !e.frozen) {
+      e.freeze(SHOTS.freezeSeconds);
+      this.fx.burst('ice', e.x, e.y, 8);
+    }
+    if (p.blast > 0) this.shotBlast(p.x, p.y, p.blast, p.damage * SHOTS.blastDamage, e);
+    if (p.chain > 0) this.chainLightning(e, p.damage * SHOTS.chainDamage, p.chain);
+    if (p.split > 0) this.splitShot(p, e, angle);
+    if (p.pierce > 0) {
+      p.pierce--;
+      return;
+    }
+    if (p.ricochet > 0) {
+      const next = this.nearestTarget({ x: p.x, y: p.y }, SHOTS.ricochetRange, true, p.hits);
+      if (next) {
+        // Bounces off this one toward the next.
+        p.ricochet--;
+        p.bounced = true;
+        const speed = Math.hypot(p.vx, p.vy);
+        const a = Math.atan2(next.y - p.y, next.x - p.x);
+        p.vx = Math.cos(a) * speed;
+        p.vy = Math.sin(a) * speed;
+        p.life = Math.max(p.life, SHOTS.ricochetRange / speed + 0.1);
+        this.sfx('bounce');
+        return;
+      }
+    }
+    p.kill();
+  }
+
+  /** Mini shots fanning out of a shot that just hit. */
+  private splitShot(p: Projectile, e: Enemy, angle: number): void {
+    const n = p.split;
+    p.split = 0;
+    const speed = Math.hypot(p.vx, p.vy) * 0.9;
+    const base = p.launched;
+    for (let i = 0; i < n; i++) {
+      const a = angle + (n > 1 ? (i / (n - 1) - 0.5) * SHOTS.splitFan : 0);
+      this.playerShots.spawn({
+        x: p.x,
+        y: p.y,
+        angle: a,
+        speed,
+        damage: p.damage * SHOTS.splitDamage,
+        radius: Math.max(4, p.radius * 0.55),
+        life: SHOTS.splitLife,
+        texture: base.texture,
+        tint: base.tint,
+        glow: base.glow,
+        spin: base.spin,
+        source: 'shot',
+        tag: 'split',
+        homing: p.homing,
+        ignore: e.uid,
+      });
+    }
+  }
+
+  /** A shot's small impact explosion, splashing everything near it but the one it hit. */
+  private shotBlast(x: number, y: number, radius: number, damage: number, except: Enemy): void {
+    this.fx.burst('fire', x, y, 8);
+    this.fx.ring(x, y, 0xffa94d, radius, 220, 4);
+    this.sfx('pop');
+    for (const o of [...this.enemies]) {
+      if (o === except || !this.isTarget(o)) continue;
+      if (Math.hypot(o.x - x, o.y - y) > radius + o.radius) continue;
+      this.hitEnemy(o, damage, { source: 'explosion', tag: 'blast', angle: Math.atan2(o.y - y, o.x - x) });
+    }
+  }
+
+  /** Lightning jumping from a hit enemy to the next nearest ones. */
+  private chainLightning(from: Enemy, damage: number, jumps: number): void {
+    const done = new Set<number>([from.uid]);
+    let cur: Vec = { x: from.x, y: from.y - 10 };
+    for (let i = 0; i < jumps; i++) {
+      const next = this.nearestTarget(cur, SHOTS.chainRange, false, done);
+      if (!next) break;
+      done.add(next.uid);
+      const to = { x: next.x, y: next.y - 10 };
+      this.fx.zap(cur, to, SHOTS.chainColor);
+      this.hitEnemy(next, damage, { source: 'zap', angle: Math.atan2(to.y - cur.y, to.x - cur.x) });
+      cur = to;
+    }
+    if (done.size > 1) this.sfx('zap');
+  }
+
+  /** The nearest enemy Morty could fight within `range` of a point. */
+  private nearestTarget(from: Vec, range: number, los: boolean, skip?: ReadonlySet<number>): Enemy | null {
+    let best: Enemy | null = null;
+    let bestD = range;
+    for (const e of this.enemies) {
+      if (!this.isTarget(e) || e.spawnLeft > 0 || skip?.has(e.uid)) continue;
+      const d = Math.hypot(e.x - from.x, e.y - from.y);
+      if (d >= bestD) continue;
+      if (los && this.roomView && !this.roomView.lineOfSight(from.x, from.y, e.x, e.y)) continue;
+      best = e;
+      bestD = d;
+    }
+    return best;
+  }
+
+  /** What a homing shot turns toward: the nearest enemy ahead of it. */
+  private homingTarget(p: Projectile): Vec | null {
+    const heading = Math.atan2(p.vy, p.vx);
+    let best: Enemy | null = null;
+    let bestD = SHOTS.homingRange;
+    for (const e of this.enemies) {
+      if (!this.isTarget(e) || e.spawnLeft > 0 || p.hits.has(e.uid)) continue;
+      const d = Math.hypot(e.x - p.x, e.y - p.y);
+      if (d >= bestD) continue;
+      const a = Math.atan2(e.y - p.y, e.x - p.x);
+      if (Math.abs(Math.atan2(Math.sin(a - heading), Math.cos(a - heading))) > SHOTS.homingCone) continue;
+      best = e;
+      bestD = d;
+    }
+    return best ? { x: best.x, y: best.y } : null;
+  }
+
+  /** Removes enemy bullets within `radius` of a point; returns how many. */
+  private eatEnemyShots(at: Vec, radius: number): number {
+    let n = 0;
+    this.enemyShots.forEachActive((p) => {
+      if (Math.hypot(p.x - at.x, p.y - at.y) > radius + p.radius) return;
+      p.kill();
+      n++;
+    });
+    return n;
   }
 
   private checkEnemyShots(): void {
@@ -1807,7 +2181,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     }
   }
 
-  hitEnemy(e: Enemy, damage: number, opts: { source: HitSource; tag?: string; bounced?: boolean; angle?: number }): void {
+  hitEnemy(e: Enemy, damage: number, opts: { source: HitSource; tag?: string; bounced?: boolean; angle?: number; crit?: boolean }): void {
     if (!e.alive || e.invulnerable || e.passive || damage <= 0) return;
     if (e.shieldHits > 0) {
       if (opts.source === 'explosion' || opts.source === 'rick') {
@@ -1841,7 +2215,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     if (opts.angle !== undefined) e.knock(opts.angle, this.stats().knockback);
     if (opts.source !== 'rick' && opts.source !== 'hazard') this.addRickMeter(dmg);
     const killed = e.hp <= 0;
-    const info: HitInfo = { source: opts.source, damage: dmg, tag: opts.tag, wasFrozen, killed, bounced: opts.bounced };
+    const info: HitInfo = { source: opts.source, damage: dmg, tag: opts.tag, wasFrozen, killed, bounced: opts.bounced, crit: opts.crit };
     runHook(this.sources(), 'onHit', this.ctx, e, info);
     if (!killed && e.alive && opts.source === 'shot') {
       const st = this.stats();
@@ -1900,11 +2274,18 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   }
 
   private explode(spec: ExplosionSpec): void {
-    this.fx.burst('fire', spec.x, spec.y);
-    this.fx.burst('smoke', spec.x, spec.y);
-    this.sfx('explosion');
-    this.fx.shake(14, 320);
-    this.fx.flash(spec.color ?? 0xffa94d, 120);
+    if (spec.small) {
+      this.fx.burst('slime', spec.x, spec.y, 10);
+      this.fx.ring(spec.x, spec.y, spec.color ?? 0xffa94d, spec.radius, 260, 5);
+      this.sfx('pop');
+      this.fx.shake(4, 120);
+    } else {
+      this.fx.burst('fire', spec.x, spec.y);
+      this.fx.burst('smoke', spec.x, spec.y);
+      this.sfx('explosion');
+      this.fx.shake(14, 320);
+      this.fx.flash(spec.color ?? 0xffa94d, 120);
+    }
     const ring = this.add.circle(spec.x, spec.y, spec.radius, spec.color ?? 0xffa94d, 0.25).setDepth(4400).setStrokeStyle(6, 0xfff1c9, 0.9);
     ring.setScale(0.2);
     this.tweens.add({ targets: ring, scale: 1, alpha: 0, duration: 380, onComplete: () => ring.destroy() });
@@ -2199,6 +2580,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     if (!item) return;
     const inv = this.run.inventory;
     const before = new Set(activeSynergies(inv.owned(), this.reg.synergies).map((s) => s.id));
+    const beforeT = new Set(activeTransformations(inv.owned(), this.reg.transformations).map((t) => t.id));
     const res = inv.add(item, { charge });
     if (!res.added) {
       this.hud.toast(`You already have ${item.name}.`);
@@ -2211,17 +2593,36 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.run.stats.itemsFound.push(id);
     this.run.offered.add(id);
     this.invalidateStats();
+    this.syncCompanions();
+    this.refreshLook();
     if (!silent) {
       const kind = item.kind === 'active' ? 'Active item: right-click or C' : item.kind === 'consumable' ? 'Consumable: press R' : item.kind === 'weapon' ? 'Weapon' : 'Passive';
-      this.hud.itemBanner(item.name, item.blurb, kind);
+      this.hud.itemBanner(item.name, item.blurb, item.effect, kind);
       this.sfx('item');
       this.fx.burst('scrap', this.player.x, this.player.y - 30, 10);
     }
+    // New synergies and transformations get their own moment, after the item's banner.
+    let delay = silent ? 0 : 1.4;
     for (const s of activeSynergies(inv.owned(), this.reg.synergies)) {
-      if (!before.has(s.id)) {
-        this.after(silent ? 0 : 1.6, () => this.hud.itemBanner(`Synergy: ${s.name}`, s.blurb, 'Synergy'), false);
-      }
+      if (before.has(s.id)) continue;
+      this.after(delay, () => this.celebrate('SYNERGY!', s.name, s.effect, 0x97ce4c), false);
+      delay += 1.6;
     }
+    for (const t of activeTransformations(inv.owned(), this.reg.transformations)) {
+      if (beforeT.has(t.id)) continue;
+      this.after(delay, () => this.celebrate('TRANSFORMATION!', t.name, t.effect, 0xff8fd8), false);
+      delay += 1.6;
+    }
+  }
+
+  /** The "SYNERGY!" (or "TRANSFORMATION!") moment: a big banner, confetti and a fanfare. */
+  private celebrate(title: string, name: string, effect: string, color: number): void {
+    const p = this.player;
+    this.hud.celebrate(title, name, effect, color);
+    this.sfx('synergy');
+    this.fx.burst('confetti', p.x, p.y - 30);
+    this.fx.ring(p.x, p.y - 20, color, 110, 520, 6);
+    this.fx.flash(color, 120);
   }
 
   private useActive(): void {
@@ -2239,6 +2640,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       return;
     }
     inv.spendActive();
+    // Actives are big: every use gets a moment.
+    this.fx.ring(this.player.x, this.player.y - 16, 0xffffff, 160, 360, 5);
+    runHook(this.sources(), 'onUseActive', this.ctx, def.id);
   }
 
   private useConsumable(): void {
@@ -2322,7 +2726,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const price = p.price !== undefined ? ` (${p.price} Scrap)` : '';
     if (held && this.pendingSwap === p) return `Swap ${held.name} for ${p.name}?${price} Press E again`;
     if (held) return `${p.price !== undefined ? 'Buy' : 'Take'} ${p.name}${price} (swaps out ${held.name})`;
-    return p.price !== undefined ? `Buy ${p.name}${price}` : `Take ${p.name}`;
+    if (p.price !== undefined) return `Buy ${p.name}${price}`;
+    return p.group ? `Take ${p.name} (you only get one)` : `Take ${p.name}`;
   }
 
   private takePedestal(p: PedestalObj): void {
@@ -2493,15 +2898,18 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const act = run.act;
     const floor = run.floor;
     const gadget = this.reg.gadgets.get(act.rick.gadget);
+    const describe = (id: ContentId) => ({ id, name: items.get(id)?.name ?? id, effect: items.get(id)?.effect ?? '' });
     return {
       hp: run.hp,
       maxHp: this.maxHp(),
       rick: { value: run.rickMeter / RICK_METER.max, ready: run.rickMeter >= RICK_METER.max, gadget: gadget?.name ?? 'Rick' },
-      active: inv.active ? { id: inv.active.id, name: items.get(inv.active.id)?.name ?? inv.active.id, charge: inv.active.charge, max: inv.active.max } : null,
-      consumable: inv.consumable ? { id: inv.consumable, name: items.get(inv.consumable)?.name ?? inv.consumable } : null,
-      weapon: inv.weapon ? { id: inv.weapon, name: items.get(inv.weapon)?.name ?? inv.weapon } : null,
+      active: inv.active ? { ...describe(inv.active.id), charge: inv.active.charge, max: inv.active.max } : null,
+      consumable: inv.consumable ? describe(inv.consumable) : null,
+      weapon: inv.weapon ? describe(inv.weapon) : null,
       scene: this.stage.running,
-      passives: inv.passives.map((id) => ({ id, name: items.get(id)?.name ?? id })),
+      passives: inv.passives.map(describe),
+      synergies: activeSynergies(inv.owned(), this.reg.synergies).map((s) => ({ name: s.name, effect: s.effect })),
+      transformation: this.transformation ? { name: this.transformation.name, effect: this.transformation.effect } : null,
       scrap: run.scrap,
       statuses: run.statuses.list().map((s) => ({ id: s.def.id, name: s.def.name, positive: s.def.positive, remaining: s.remaining, kind: s.def.duration.kind })),
       actName: act.name,

@@ -84,6 +84,36 @@ export class Fx {
     this.scene.tweens.add({ targets: c, scale: 1, alpha: 0, duration: ms, ease: 'Cubic.easeOut', onComplete: () => c.destroy() });
   }
 
+  /** A jagged lightning bolt between two points (chain lightning). */
+  zap(from: Vec, to: Vec, color = 0x9fe8ff): void {
+    const g = this.scene.add.graphics().setDepth(4650).setBlendMode(Phaser.BlendModes.ADD);
+    const segs = 6;
+    const nx = -(to.y - from.y);
+    const ny = to.x - from.x;
+    const len = Math.hypot(nx, ny) || 1;
+    const pts: Vec[] = [from];
+    for (let i = 1; i < segs; i++) {
+      const k = i / segs;
+      // Deterministic zig-zag, so the look never touches the gameplay RNG.
+      const off = (i % 2 ? 1 : -1) * (6 + ((i * 7) % 5) * 2);
+      pts.push({ x: from.x + (to.x - from.x) * k + (nx / len) * off, y: from.y + (to.y - from.y) * k + (ny / len) * off });
+    }
+    pts.push(to);
+    for (const [w, a] of [[7, 0.35], [2.5, 1]] as const) {
+      g.lineStyle(w, w > 3 ? color : 0xffffff, a);
+      g.beginPath();
+      g.moveTo(pts[0].x, pts[0].y);
+      for (const p of pts.slice(1)) g.lineTo(p.x, p.y);
+      g.strokePath();
+    }
+    this.scene.tweens.add({ targets: g, alpha: 0, duration: 180, onComplete: () => g.destroy() });
+  }
+
+  /** A quick blade swipe. */
+  slash(x: number, y: number, angle: number, color = 0xffffff): void {
+    this.pop(x, y, 'fx-slash', color, 0.8, 1.5, 200, angle);
+  }
+
   floatText(x: number, y: number, text: string, color = '#ffffff', size = 20): void {
     const t = this.scene.add
       .text(x, y, text, { fontFamily: FONT, fontSize: `${size}px`, fontStyle: 'bold', color, stroke: '#1a1424', strokeThickness: 5 })

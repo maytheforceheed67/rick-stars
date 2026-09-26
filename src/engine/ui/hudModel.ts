@@ -16,13 +16,15 @@ export interface HudModel {
   hp: number;
   maxHp: number;
   rick: { value: number; ready: boolean; gadget: string };
-  active: { id: ContentId; name: string; charge: number; max: number } | null;
-  consumable: { id: ContentId; name: string } | null;
+  active: { id: ContentId; name: string; effect: string; charge: number; max: number } | null;
+  consumable: { id: ContentId; name: string; effect: string } | null;
   /** Null until the story hands Morty a weapon (and in quiet acts). */
-  weapon: { id: ContentId; name: string } | null;
+  weapon: { id: ContentId; name: string; effect: string } | null;
   /** An in-engine scene is playing (show how to skip it). */
   scene: boolean;
-  passives: { id: ContentId; name: string }[];
+  passives: { id: ContentId; name: string; effect: string }[];
+  synergies: { name: string; effect: string }[];
+  transformation: { name: string; effect: string } | null;
   scrap: number;
   statuses: { id: ContentId; name: string; positive: boolean; remaining: number; kind: string }[];
   actName: string;
@@ -42,7 +44,10 @@ export interface HudModel {
 export interface HudApi {
   toast(text: string, opts?: ToastOptions): void;
   banner(title: string, sub?: string, color?: number): void;
-  itemBanner(name: string, blurb: string, kind: string): void;
+  /** The pickup banner: the funny line, then one plain line saying what it does. */
+  itemBanner(name: string, blurb: string, effect: string, kind: string): void;
+  /** A big "SYNERGY!" or "TRANSFORMATION!" moment. */
+  celebrate(title: string, name: string, effect: string, color: number): void;
   showChoice(prompt: ChoicePrompt): void;
   hideChoice(): void;
   toggleMap(): void;

@@ -121,6 +121,24 @@ export const ENGINE_SPRITES: SpriteArt[] = [
     },
   },
   { key: 'fx-dot', width: 8, height: 8, draw: (g) => dot(g, 4, 4, 4, 0xffffff) },
+  // A piece of junk circling Morty (the orbit stat).
+  { key: 'orbit-junk', width: 22, height: 22, draw: (g) => gear(g, 11, 11, 10, 0xc9ced9) },
+  {
+    // A slash mark for blades and stomps.
+    key: 'fx-slash',
+    width: 48,
+    height: 20,
+    draw: (g) => {
+      g.fillStyle(0xffffff, 1);
+      g.beginPath();
+      g.moveTo(0, 16);
+      g.lineTo(24, 2);
+      g.lineTo(48, 16);
+      g.lineTo(24, 9);
+      g.closePath();
+      g.fillPath();
+    },
+  },
   {
     key: 'elite-shielded',
     width: 16,

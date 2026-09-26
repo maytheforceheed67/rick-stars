@@ -39,6 +39,34 @@ export const BASE_STATS: StatBlock = {
   magnet: 0,
   /** Grappling shoe battery capacity multiplier (Pilot mechanic). */
   shoeBattery: 1,
+
+  // Shot behaviors items switch on (0 = off). SHOTS below tunes how each one plays.
+  /** Enemies a shot passes through before it stops. */
+  pierce: 0,
+  /** Radians per second a shot turns toward the nearest enemy. */
+  homing: 0,
+  /** Mini shots a shot bursts into when it hits something. */
+  split: 0,
+  /** Radius of the small explosion when a shot hits. */
+  blast: 0,
+  /** Enemies a hit's lightning jumps on to. */
+  chain: 0,
+  /** Pieces of junk circling Morty that bonk enemies and block bullets. */
+  orbit: 0,
+  /** Seconds without firing that charge the next shot into a big one. */
+  chargeShot: 0,
+  /** Share of volleys that are critical hits (0.2 = every 5th). */
+  critRate: 0,
+  /** Share of volleys that are freeze bolts (0.25 = every 4th). */
+  freezeRate: 0,
+  /** Times a shot bounces off an enemy toward the next one. */
+  ricochet: 0,
+  /** Radius around Morty in which a dash erases enemy bullets. */
+  dashEraseShots: 0,
+  /** Chance an enemy bullet or hit simply misses him. */
+  dodgeChance: 0,
+  /** Multiplies how often companions attack. */
+  companionRate: 1,
 };
 
 export const STAT_LIMITS: StatLimits = {
@@ -61,6 +89,71 @@ export const STAT_LIMITS: StatLimits = {
   shopPriceMult: [0.3, 3],
   enemyWindupMult: [1, 2.5],
   shoeBattery: [0.5, 4],
+  pierce: [0, 6],
+  homing: [0, 12],
+  split: [0, 8],
+  blast: [0, 180],
+  chain: [0, 6],
+  orbit: [0, 6],
+  chargeShot: [0, 3],
+  critRate: [0, 1],
+  freezeRate: [0, 1],
+  ricochet: [0, 4],
+  dashEraseShots: [0, 200],
+  dodgeChance: [0, 0.6],
+  companionRate: [0.5, 4],
+};
+
+/** How the shot behaviors in BASE_STATS play out. */
+export const SHOTS = {
+  /** Damage multiplier of a critical hit. */
+  critMult: 3,
+  /** Seconds a freeze bolt freezes what it hits. */
+  freezeSeconds: 2.5,
+  /** Damage share and life of split mini shots, and the fan they spread over (radians). */
+  splitDamage: 0.4,
+  splitLife: 0.4,
+  splitFan: 1.1,
+  /** Damage share of a shot's blast on everything else nearby. */
+  blastDamage: 0.5,
+  /** Damage share, reach (px) and look of chain lightning. */
+  chainDamage: 0.5,
+  chainRange: 170,
+  chainColor: 0x9fe8ff,
+  /** How far a ricochet looks for its next target. */
+  ricochetRange: 320,
+  /** How far homing shots look for a target, and the cone (radians either side) they look in. */
+  homingRange: 420,
+  homingCone: 1.9,
+  /** Orbiting junk: circle radius, turn speed, damage share and per-enemy hit cooldown. */
+  orbitRadius: 72,
+  orbitSpeed: 3.2,
+  orbitDamage: 0.6,
+  orbitCooldown: 0.5,
+  /** A charged shot's damage and size multipliers and the enemies it passes through. */
+  chargeMult: 3,
+  chargeSize: 1.9,
+  chargePierce: 2,
+};
+
+/**
+ * The rules every item follows (tests/items.test.ts). Plain stat changes have to be felt: none
+ * under 20%, and an item that is only stats needs one change of 25% or more, or a whole heart.
+ */
+export const ITEM_RULES = {
+  minStatChange: 0.2,
+  bigStatChange: 0.25,
+  bigHearts: 1,
+  /**
+   * Stats that switch on a behavior rather than bumping a number; they count as 'shots' (or
+   * 'on-dash' and so on), not as plain stats.
+   */
+  behaviorStats: [
+    'pierce', 'homing', 'split', 'blast', 'chain', 'orbit', 'chargeShot', 'critRate', 'freezeRate', 'ricochet',
+    'bounces', 'projectiles', 'spread', 'freezeChance', 'poisonChance', 'slowChance', 'dashEraseShots', 'dodgeChance', 'companionRate',
+    // Scrap flying to Morty, and extra Scrap per pickup: they start at zero, so they switch a thing on.
+    'magnet', 'scrapBonus',
+  ],
 };
 
 export const PLAYER = {

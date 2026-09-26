@@ -50,7 +50,7 @@ Split things however reads best; the only fixed point is that `episode.ts` expor
 | `weapons.ts` | The episode's story weapons and their shot sprites |
 | `rooms.ts` | ASCII `RoomTemplate`s |
 | `enemies.ts`, `bosses.ts` | `EnemyDef`s (bosses have a `boss` block) |
-| `items.ts` | `ItemDef`s and `SynergyDef`s |
+| `items.ts` | `ItemDef`s, `SynergyDef`s and `TransformationDef`s, plus companion and look sprites |
 | `statuses.ts` | `StatusDef`s |
 | `mechanics/` | One `MechanicDef` per episode mechanic |
 | `specialRooms.ts` | `SpecialRoomDef`s (one special room per act) |
@@ -213,24 +213,61 @@ export const dreamCrawler: EnemyDef = {
   - built-in kinds: `orb`, `paper`, `ball`, `book`, `spore`, `bolt`, `stamp`, `ice`;
   - to add a new look, register a sprite keyed `shot-<kind>` in `content.sprites`.
 
-## Items, synergies and statuses
+## Items, synergies, transformations and statuses
 
 ```ts
 { id: 'squeaky-bone', name: 'Squeaky Bone', firstAppears: 'S01E02', canon: false,
-  blurb: 'One line, shown on pickup. Make it funny.',
-  kind: 'passive', rarity: 'common', price: 14,     // 'active' | 'consumable' | 'weapon'; 'rare'; 'story' for scripted gear
-  stats: { add: { damage: 0.5 }, mult: { fireRate: 1.1 } },
+  blurb: 'One funny line, shown on pickup.',
+  effect: 'Shots bounce off an enemy toward the next one.', // one plain line: exactly what it does
+  tags: ['shots'],                                        // what it changes (see below)
+  kind: 'passive', rarity: 'common', price: 14,           // 'active' | 'consumable' | 'weapon'; 'rare'; 'story' for scripted gear
+  stats: { add: { ricochet: 1 } },
   hooks: { onKill: (ctx, enemy, hit) => { /* ... */ } },
   icon: (g) => { /* draw a 32x32 icon centered on 16,16 */ } }
 ```
 
-- **Hooks:** `onFire`, `onHit`, `onKill`, `onDamageTaken`, `onDash`, `onDashContact`, `onRoomClear`.
+**The rules every item follows** (`ITEM_RULES` in `balance.ts`, enforced by `tests/items.test.ts`):
+
+- **Every item says what it does.** `blurb` is the joke; `effect` is one plain line ("Shots pierce one enemy"). The pickup banner shows both, and the pause screen lists every held item with its `effect`.
+- **Every passive changes what Morty does or what he sees.** Its `tags` say how, and the test checks each tag is backed by the item:
+  - `shots`: changes how shots behave, through the shot stats below or an `onFire` hook;
+  - `companion`: has a `companion` (a buddy that follows Morty);
+  - `on-hit`, `on-kill`, `on-dash`, `on-hurt`: a visible effect from that hook;
+  - `look`: has a `look` (a shirt color, an accessory, a trail, a shot glow);
+  - `mechanic`: runs an episode mechanic (the grappling shoes);
+  - `stat`: plain stat changes.
+- **No small stat bumps.** A plain stat change is never under 20%. An item that is only stats needs one change of at least 25%, or a whole heart.
+- **Actives are big** and tagged `room`: using one changes the room (clears bullets, freezes everything, summons help).
+- **Consumables** are tagged `heal` or `status`.
+
+**Shot behaviors** are stats in `BASE_STATS`, tuned in `SHOTS`, and stack like any stat:
+
+| Stat | What it does |
+|---|---|
+| `pierce` | Shots pass through this many enemies |
+| `homing` | Shots turn toward the nearest enemy ahead (radians per second) |
+| `split` | Shots burst into this many mini shots on a hit |
+| `blast` | Shots explode on impact with this radius |
+| `chain` | Hits zap lightning to this many more enemies |
+| `ricochet` | Shots bounce off an enemy toward the next one |
+| `orbit` | Pieces of junk circle Morty, bonking enemies and blocking bullets |
+| `chargeShot` | Seconds without firing that charge the next shot (triple damage, huge, piercing) |
+| `critRate`, `freezeRate` | Share of volleys that crit or freeze (0.2 = every 5th) |
+| `dashEraseShots` | Dashing erases enemy bullets within this radius |
+| `dodgeChance` | Chance a hit misses Morty entirely |
+| `companionRate` | How often companions attack |
+
+- **Companions:** `companion: { art, kind: 'shooter' | 'pouncer' | 'guard', every, damage, flying? }`. Register the art in `content.sprites`.
+- **Looks:** `look: { shirt?, accessory?, dy?, trail?, glow? }`. The latest item wins for each piece, and a transformation's look goes on top.
+- **Hooks:** `onFire`, `onHit`, `onKill`, `onDamageTaken`, `onDash`, `onDashContact`, `onRoomClear`, `onUseActive`. Hits tell you `source` ('shot', 'slash', 'explosion', 'zap', 'orbit', 'companion'...), `tag`, `crit` and `bounced`. For visuals, hooks call `ctx.vfx(...)`: a particle burst, a ring, a lightning zap, a slash or a floating word.
 - **Stats** combine as (base + adds) × multipliers, then clamp to `STAT_LIMITS`.
-- **Actives** have `active: { recharge: rooms, use(ctx) }`; consumables have `consumable: { use(ctx) }`.
+- **Actives** have `active: { recharge: rooms, use(ctx) }`; consumables have `consumable: { use(ctx) }`. Return `false` from `use` to keep the charge (nothing to hit).
 - **Pool flags:**
   - `locked: true` keeps an item out of pools until it's unlocked (via `unlocksOnClear` or a Garage upgrade);
   - `noPool: true` marks story gear that scripts hand out.
-- **Synergies** are `{ requires: [a, b], stats?, hooks?, blurb }` and switch on while the player holds every required item.
+- **Synergies** are `{ requires: [a, b], effect, blurb, stats?, hooks? }`. They switch on while the player holds every required item, with a "SYNERGY!" moment. Never require two actives: Morty holds one at a time.
+- **Transformations** go in `content.transformations`: `{ set, count?, look, effect, stats?, hooks? }`. Holding any `count` (default 3) items from the set transforms Morty: a new look, a strong bonus and a "TRANSFORMATION!" moment. The Pilot has two, Garage Tinkerer and Seed Smuggler.
+- **Rewards:** bosses always drop a rare item (a test checks), treasure rooms offer a choice of two, and shops lead with one good item.
 - **Statuses** have a duration: `seconds`, `rooms`, `act` or `manual`. They can also take:
   - `stats` and `flags` (`noDash`, `wobblyMove`, `wobblyAim`, `scrambled`);
   - `thenApply`, to chain into another status;

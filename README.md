@@ -65,10 +65,15 @@ Menus work with the mouse, or with W/S or the arrow keys plus Enter, Space or E.
 | **Act 3: Interdimensional Customs** | Suspicion: sneak through 3–4 queue rooms past agents and scanners until the checkpoint blows your cover. Then Rick hands over his own ray gun, agents get "ROBOT" nameplates, and there's the Confiscated Goods vault, an overpriced Duty-Free and the Customs Supervisor, followed by a 40-second sprint to the portal home. |
 | **Epilogue: "Temporarily a Genius"** | Home, with Rick's gun back in his pocket. Rick's quiz, where the right answers glow. Then the side effects kick in while Rick rambles. |
 
-There are 27 items and 3 synergies (for example Freeze Ray Mod + Frank's Switchblade). The items are:
-- 6 from the episode;
-- 2 pieces of story gear;
-- 19 invented, themed on school, 35-C and customs.
+There are 35 items to find, plus the four story weapons. Six are from the episode (Freeze Ray Mod, Rick's Flask, the Neutrino Bomb, Frank's Switchblade, Broken Leg Serum, the Mega Seed) and the rest are invented, themed on school, 35-C and Customs. Every item changes how Morty plays or looks, and says in one plain line exactly what it does:
+
+- **Shots:** pierce, homing, splitting seeds, impact blasts, chain lightning, ricochets, orbiting junk, charged shots, crits every 5th shot, ice bolts every 4th.
+- **Companions:** a reprogrammed junk drone that shoots, and a baby gloop hopper that pounces.
+- **Visible triggers:** acid splashes on kills, stomps on dashes, shoulder-pad shoves when hurt, DENIED stamps on hits.
+- **Looks:** the letterman jacket, a sparkly cologne trail, icy or acid-green shot glows.
+- **Actives change the room:** Rick's Flask burps every bullet away, the Detention Slip freezes the room, the Critter Whistle starts a stampede, the Confiscation Order turns bullets into Scrap.
+
+There are 16 synergies, each announced with a "SYNERGY!" moment, and 2 transformations: hold any 3 items from a set to become the **Garage Tinkerer** (goggles, +30% damage, extra orbiting junk, blasting shots) or the **Seed Smuggler** (trench coat and fedora, +1 heart, a chance to slip past hits, double Scrap). Treasure rooms offer a choice of two, shops lead with one good item, and bosses drop a rare. The pause screen lists everything Morty holds with its exact effect.
 
 ## Debug mode
 
@@ -159,8 +164,9 @@ The brief sketched a folder layout and some types. The code follows it, with the
 |---|---|
 | `tests/rng.test.ts` | The same seed gives the same sequence; forks are independent; seeds are created, normalized and formatted correctly |
 | `tests/dungeon.test.ts` | 1,000 seeds for every procedural act: 8–12 rooms, every room reachable, exactly one finale, the required special rooms present, no overlapping rooms, doors matching on both sides. The same seed gives the same floor. |
-| `tests/content.test.ts` | The registry validates cleanly. Canon gating, including an unlocked later-episode item staying out of the Pilot. Locked, story and already-stocked items stay out of pools. Enemy HP bands (regular 8–15, bosses 180–300). The Season 1 listing and "next up". No `Math.random` in `src/`. |
-| `tests/items.test.ts` | Stat modifiers and hooks stack; statuses tick, chain and expire; inventory rules; synergies trigger |
+| `tests/content.test.ts` | The registry validates cleanly. Canon gating, including an unlocked later-episode item staying out of the Pilot. Locked, story and already-stocked items stay out of pools. The Season 1 listing and "next up". No `Math.random` in `src/`. |
+| `tests/items.test.ts` | Stat modifiers and hooks stack; statuses tick, chain and expire; inventory rules, including an active item keeping its charge through a swap. The item rules: every item has a plain effect line and honest tags, no plain stat change under 20%, stat-only items need a 25% change or a heart, actives change the room, bosses drop rares. Synergies (12+) and transformations trigger from exactly their items. |
+| `tests/weapons.test.ts` | Every act with enemies gets a story weapon with a speaker and a line, and scripted hand-overs exist in the episode's code. The Pilot's weapon order. Shot items carry over between weapons. Hits to kill from each act's weapon: 2–4 for regular enemies (summons included), 5–8 for elites. Boss fights last 60–90 seconds. |
 | `tests/save.test.ts` | A fresh save, a round-trip, a v1 fixture migrating, corrupt-save backup and reset, out-of-range values cleaned up |
 
 ## Not yet implemented

@@ -19,6 +19,8 @@ export interface ProjectileOpts {
   tint?: number;
   /** Degrees per second of visual spin (0 = point along the velocity). */
   spin?: number;
+  /** Stays upright and just faces left or right (critters running). */
+  upright?: boolean;
   source?: HitSource;
   tag?: string;
   applies?: string;
@@ -26,6 +28,20 @@ export interface ProjectileOpts {
   baseRadius?: number;
   /** Halo color, for pools with glow (defaults to the tint). */
   glow?: number;
+  /** Player shot behaviors (see BASE_STATS): enemies to pass through, homing turn rate, mini
+   * shots to split into, blast radius, lightning jumps, enemy ricochets. */
+  pierce?: number;
+  homing?: number;
+  split?: number;
+  blast?: number;
+  chain?: number;
+  ricochet?: number;
+  /** A critical hit, a freeze bolt, or a charged shot. */
+  crit?: boolean;
+  freezes?: boolean;
+  charged?: boolean;
+  /** An enemy (uid) this shot can't hit, e.g. the one a split shot burst out of. */
+  ignore?: number;
 }
 
 export class Projectile {
@@ -40,9 +56,23 @@ export class Projectile {
   bounces = 0;
   bounced = false;
   spin = 0;
+  upright = false;
   source: HitSource = 'shot';
   tag?: string;
   applies?: string;
+  pierce = 0;
+  homing = 0;
+  split = 0;
+  blast = 0;
+  chain = 0;
+  ricochet = 0;
+  crit = false;
+  freezes = false;
+  charged = false;
+  /** Enemies already hit, so a piercing shot never hits the same one twice. */
+  readonly hits = new Set<number>();
+  /** How it was launched (split shots copy their parent's look). */
+  launched!: ProjectileOpts;
   readonly img: Phaser.GameObjects.Image;
   /** Soft additive halo that makes the player's shots read as bright energy. */
   private readonly glow?: Phaser.GameObjects.Image;
@@ -58,6 +88,7 @@ export class Projectile {
   }
 
   launch(o: ProjectileOpts): void {
+    this.launched = o;
     this.active = true;
     this.x = o.x;
     this.y = o.y;
@@ -69,14 +100,26 @@ export class Projectile {
     this.bounces = o.bounces ?? 0;
     this.bounced = false;
     this.spin = o.spin ?? 0;
+    this.upright = !!o.upright;
     this.source = o.source ?? 'shot';
     this.tag = o.tag;
     this.applies = o.applies;
+    this.pierce = o.pierce ?? 0;
+    this.homing = o.homing ?? 0;
+    this.split = o.split ?? 0;
+    this.blast = o.blast ?? 0;
+    this.chain = o.chain ?? 0;
+    this.ricochet = o.ricochet ?? 0;
+    this.crit = !!o.crit;
+    this.freezes = !!o.freezes;
+    this.charged = !!o.charged;
+    this.hits.clear();
+    if (o.ignore !== undefined) this.hits.add(o.ignore);
     const scale = o.radius / (o.baseRadius ?? 8);
     this.img.setTexture(o.texture).setScale(scale).setPosition(o.x, o.y).setVisible(true).setActive(true).setAlpha(1);
     if (o.tint !== undefined) this.img.setTint(o.tint);
     else this.img.clearTint();
-    this.img.setRotation(this.spin ? 0 : o.angle);
+    this.img.setRotation(this.spin || this.upright ? 0 : o.angle).setFlipX(this.upright && Math.cos(o.angle) < 0);
     if (this.glow) {
       this.glow.setPosition(o.x, o.y).setScale((o.radius * 3.4) / 8).setVisible(true).setTint(o.glow ?? o.tint ?? 0xffffff);
     }
@@ -115,11 +158,32 @@ export class ProjectilePool {
     return p;
   }
 
-  /** Moves everything; calls onBounce/onDie for effects. */
-  update(dt: number, room: RoomView, onBounce: (p: Projectile) => void, onDie: (p: Projectile, hitWall: boolean) => void): void {
+  /**
+   * Moves everything; calls onBounce/onDie for effects. `steer` gets each homing shot and returns
+   * the point it should turn toward (or null).
+   */
+  update(
+    dt: number,
+    room: RoomView,
+    onBounce: (p: Projectile) => void,
+    onDie: (p: Projectile, hitWall: boolean) => void,
+    steer?: (p: Projectile) => { x: number; y: number } | null,
+  ): void {
     for (const p of this.items) {
       if (!p.active) continue;
       p.life -= dt;
+      if (p.homing > 0 && steer) {
+        const target = steer(p);
+        if (target) {
+          const speed = Math.hypot(p.vx, p.vy);
+          const cur = Math.atan2(p.vy, p.vx);
+          const want = Math.atan2(target.y - p.y, target.x - p.x);
+          const diff = Math.atan2(Math.sin(want - cur), Math.cos(want - cur));
+          const turn = Math.max(-p.homing * dt, Math.min(p.homing * dt, diff));
+          p.vx = Math.cos(cur + turn) * speed;
+          p.vy = Math.sin(cur + turn) * speed;
+        }
+      }
       if (p.life <= 0) {
         onDie(p, false);
         p.kill();
@@ -147,6 +211,7 @@ export class ProjectilePool {
       p.img.setPosition(p.x, p.y);
       p.syncGlow();
       if (p.spin) p.img.angle += p.spin * dt;
+      else if (p.upright) p.img.setFlipX(p.vx < 0);
       else p.img.setRotation(Math.atan2(p.vy, p.vx));
     }
   }
