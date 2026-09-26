@@ -26,7 +26,7 @@ export interface HudModel {
   actNumber: number;
   actCount: number;
   widgets: HudWidget[];
-  boss: { title: string; hp: number; maxHp: number } | null;
+  boss: { title: string; hp: number; maxHp: number; phases?: number[] } | null;
   objective: string | null;
   timer: { left: number; label: string } | null;
   hint: string | null;

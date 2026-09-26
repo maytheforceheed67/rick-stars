@@ -29,7 +29,7 @@ export const popQuiz: EnemyDef = {
   art: ART.popQuiz,
   deathFx: 'paper',
   scrapChance: 0.2,
-  elite: { hpMult: 2.2, scale: 1.3, params: { speed: 1.25 } },
+  elite: { hpMult: 2.3, scale: 1.3, params: { speed: 1.25 } },
   brain: (api) => swarmer(api, { wobble: 0.8, freq: 6, speed: api.param('speed', 1) }),
 };
 
@@ -42,7 +42,7 @@ export const hallMonitor: EnemyDef = {
   radius: 14,
   contactDamage: 1,
   art: ART.hallMonitor,
-  elite: { hpMult: 1.7, scale: 1.2, params: { every: 3.5, calls: 2 } },
+  elite: { hpMult: 1.9, scale: 1.2, params: { every: 3.5, calls: 2 } },
   brain: function* (api: EnemyApi): Brain {
     let whistle = api.rng.float(2.5, 4.5);
     while (true) {
@@ -77,7 +77,7 @@ export const dodgeballJock: EnemyDef = {
   radius: 15,
   contactDamage: 1,
   art: ART.dodgeballJock,
-  elite: { hpMult: 1.6, scale: 1.2, params: { count: 3, spread: 0.5 } },
+  elite: { hpMult: 1.8, scale: 1.2, params: { count: 3, spread: 0.5 } },
   brain: (api) =>
     shooter(api, {
       min: 200,
@@ -106,8 +106,8 @@ export const cafeteriaSlop: EnemyDef = {
   contactDamage: 1,
   art: ART.cafeteriaSlop,
   deathFx: 'slime',
-  elite: { hpMult: 1.6, scale: 1.25, params: { splits: 3 } },
-  brain: (api) => chaser(api, { speed: 1, lungeEvery: 4, lungeMult: 2.6, windup: 0.5 }),
+  elite: { hpMult: 1.7, scale: 1.25, params: { splits: 3 } },
+  brain: (api) => chaser(api, { speed: 1, lungeEvery: 4, lungeMult: 2.6, windup: 0.5, flank: true }),
   onDeath: (api) => {
     const n = api.param('splits', 2);
     for (let i = 0; i < n; i++) {
@@ -170,7 +170,7 @@ export const gloopHopper: EnemyDef = {
   art: ART.gloopHopper,
   deathFx: 'slime',
   elite: { hpMult: 1.8, scale: 1.25, params: { rest: 0.15 } },
-  brain: (api) => charger(api, { windup: 0.45, chargeMult: 3.4, chargeTime: 0.34, rest: api.param('rest', 0.5), approach: 0.5 }),
+  brain: (api) => charger(api, { windup: 0.45, chargeMult: 3.4, chargeTime: 0.34, rest: api.param('rest', 0.5), approach: 0.5, flank: true }),
 };
 
 /**
@@ -268,9 +268,14 @@ export const puffPolyp: EnemyDef = {
   knockbackResist: 1,
   elite: { hpMult: 1.7, scale: 1.25, params: { ring: 1 } },
   brain: function* (api: EnemyApi): Brain {
-    yield api.rng.float(0.5, 1.8);
+    yield api.rng.float(0.5, 1.4);
     while (true) {
       api.stop();
+      // Rooted in place: it only fires when it can see Morty.
+      if (!api.canSeePlayer()) {
+        yield 0.3;
+        continue;
+      }
       const ring = api.param('ring', 0) > 0;
       yield* api.windup(0.55, () =>
         ring
@@ -280,7 +285,7 @@ export const puffPolyp: EnemyDef = {
       api.sfx('throw');
       if (ring) api.shoot({ angle: api.angleToPlayer(), speed: 230, kind: 'spore', count: 8, spread: Math.PI * 2 * (7 / 8) });
       else api.shoot({ angle: api.angleToPlayer(), speed: 240, kind: 'spore', count: 5, spread: 1.1 });
-      yield 2.4;
+      yield 1.3;
     }
   },
 };
@@ -297,7 +302,7 @@ export const clerk: EnemyDef = {
   contactDamage: 1,
   art: ART.clerk,
   nameplate: agentNameplate,
-  elite: { hpMult: 1.7, scale: 1.2, params: { count: 3 } },
+  elite: { hpMult: 2.2, scale: 1.2, params: { count: 3 } },
   brain: function* (api: EnemyApi): Brain {
     let cooldown = api.rng.float(0.8, 2);
     while (true) {
@@ -332,7 +337,7 @@ export const guard: EnemyDef = {
   contactDamage: 1,
   art: ART.guard,
   nameplate: agentNameplate,
-  elite: { hpMult: 1.6, scale: 1.2, params: { burst: 5 } },
+  elite: { hpMult: 2, scale: 1.2, params: { burst: 5 } },
   brain: function* (api: EnemyApi): Brain {
     let cooldown = api.rng.float(1, 2.4);
     while (true) {
@@ -365,7 +370,7 @@ export const riot: EnemyDef = {
   shieldArc: 120,
   knockbackResist: 0.6,
   nameplate: agentNameplate,
-  elite: { hpMult: 1.6, scale: 1.2, params: { turn: 2.4 } },
+  elite: { hpMult: 1.8, scale: 1.2, params: { turn: 2.4 } },
   brain: function* (api: EnemyApi): Brain {
     const mem = api.self.memory;
     mem.facing = api.angleToPlayer();
@@ -405,7 +410,7 @@ export const sniper: EnemyDef = {
   contactDamage: 1,
   art: ART.sniper,
   nameplate: agentNameplate,
-  elite: { hpMult: 1.8, scale: 1.2, params: { shots: 2 } },
+  elite: { hpMult: 2.6, scale: 1.2, params: { shots: 2 } },
   brain: function* (api: EnemyApi): Brain {
     let cooldown = api.rng.float(1.5, 3);
     while (true) {
@@ -432,6 +437,311 @@ export const sniper: EnemyDef = {
   },
 };
 
+// ---- roles added so every act has a rusher, shooter, area denial, tank, support and summoner ----
+
+const SUP = PILOT.support;
+
+/** Support: cheers nearby enemies on (faster, a little healed). Keeps well back. */
+export const pepSquad: EnemyDef = {
+  id: 'pep-squad',
+  name: 'Pep Squad Captain',
+  firstAppears: S01E01,
+  canon: false,
+  ...PILOT.enemies['pep-squad'],
+  radius: 13,
+  contactDamage: 1,
+  art: ART.pepSquad,
+  elite: { hpMult: 1.9, scale: 1.2 },
+  brain: function* (api: EnemyApi): Brain {
+    let cheer = api.rng.float(1.5, 2.5);
+    let toss = 1.4;
+    while (true) {
+      api.keepDistance(220, 380, 0.9);
+      cheer -= api.dt();
+      toss -= api.dt();
+      const team = api.allies(SUP.cheer.radius);
+      if (cheer <= 0 && team.length) {
+        api.stop();
+        yield* api.windup(0.6, { kind: 'ring', x: api.self.x, y: api.self.y, radius: SUP.cheer.radius, thickness: 10 });
+        api.say(api.rng.pick(LINES.pepSquad.cheer), 1.4);
+        api.sfx('correct');
+        for (const e of api.allies(SUP.cheer.radius)) {
+          e.haste(SUP.cheer.haste);
+          e.heal(SUP.cheer.heal);
+        }
+        cheer = api.rng.float(SUP.cheer.every[0], SUP.cheer.every[1]);
+      } else if (toss <= 0 && api.canSeePlayer()) {
+        // Alone, she lobs pom-poms so she's never just standing around.
+        api.stop();
+        yield* api.windup(0.45);
+        api.shoot({ angle: api.angleToPlayer(), speed: 280, kind: 'ball', radius: 9, color: 0xf2c14e });
+        api.sfx('throw');
+        toss = 1.4;
+      }
+      yield;
+    }
+  },
+};
+
+/** Area denial: lobs beakers that leave acid puddles where Morty was standing. */
+export const labPartner: EnemyDef = {
+  id: 'lab-partner',
+  name: 'Lab Partner',
+  firstAppears: S01E01,
+  canon: false,
+  ...PILOT.enemies['lab-partner'],
+  radius: 13,
+  contactDamage: 1,
+  art: ART.labPartner,
+  elite: { hpMult: 1.8, scale: 1.2, params: { puddles: 2 } },
+  brain: function* (api: EnemyApi): Brain {
+    let cooldown = api.rng.float(1, 2);
+    while (true) {
+      api.keepDistance(200, 340, 1);
+      cooldown -= api.dt();
+      if (cooldown <= 0 && api.canSeePlayer()) {
+        api.stop();
+        const n = api.param('puddles', 1);
+        const spots = Array.from({ length: n }, (_, i) => ({ x: api.player.x + (i ? api.rng.float(-70, 70) : 0), y: api.player.y + (i ? api.rng.float(-70, 70) : 0) }));
+        yield* api.windup(0.75, spots.map((p) => ({ kind: 'circle' as const, x: p.x, y: p.y, radius: 56 })));
+        api.sfx('splat');
+        for (const p of spots) api.hazard({ kind: 'pool', x: p.x, y: p.y, radius: 56, seconds: 3.2, damage: 1, color: 0x9bd35a });
+        cooldown = 2.6;
+      }
+      yield;
+    }
+  },
+};
+
+/** Support: pulses pollen that heals the critters around it. */
+export const bloomTender: EnemyDef = {
+  id: 'bloom-tender',
+  name: 'Bloom Tender',
+  firstAppears: S01E01,
+  canon: false,
+  ...PILOT.enemies['bloom-tender'],
+  radius: 14,
+  contactDamage: 1,
+  art: ART.bloomTender,
+  deathFx: 'heal',
+  elite: { hpMult: 1.8, scale: 1.2 },
+  brain: function* (api: EnemyApi): Brain {
+    let pulse = api.rng.float(1.5, 2.5);
+    while (true) {
+      const hurt = api.allies(SUP.pollen.radius).some((e) => e.hp < e.maxHp);
+      if (hurt) api.keepDistance(160, 300, 0.8);
+      else api.flank(0.8);
+      pulse -= api.dt();
+      if (pulse <= 0) {
+        api.stop();
+        yield* api.windup(0.6, { kind: 'ring', x: api.self.x, y: api.self.y, radius: SUP.pollen.radius, thickness: 12 });
+        api.sfx('heal');
+        for (const e of api.allies(SUP.pollen.radius)) e.heal(e.maxHp * SUP.pollen.healShare);
+        // The pollen stings, too.
+        if (api.distToPlayer() < SUP.pollen.radius) api.melee({ shape: 'circle', x: api.self.x, y: api.self.y, radius: SUP.pollen.radius * 0.5, damage: 1 });
+        pulse = SUP.pollen.every;
+      }
+      yield;
+    }
+  },
+};
+
+/** Tiny critters the Brood Mound spits out. */
+export const miteling: EnemyDef = {
+  id: 'miteling',
+  name: 'Miteling',
+  firstAppears: S01E01,
+  canon: false,
+  ...PILOT.enemies.miteling,
+  radius: 8,
+  contactDamage: 1,
+  art: ART.miteling,
+  deathFx: 'slime',
+  scrapChance: 0.08,
+  brain: (api) => swarmer(api, { wobble: 0.9, freq: 7 }),
+};
+
+/** Summoner: a lumpy nest that keeps birthing mitelings. */
+export const broodMound: EnemyDef = {
+  id: 'brood-mound',
+  name: 'Brood Mound',
+  firstAppears: S01E01,
+  canon: false,
+  ...PILOT.enemies['brood-mound'],
+  radius: 20,
+  contactDamage: 1,
+  knockbackResist: 1,
+  art: ART.broodMound,
+  deathFx: 'slime',
+  elite: { hpMult: 1.6, scale: 1.2 },
+  brain: function* (api: EnemyApi): Brain {
+    const mem = api.self.memory;
+    mem.brood = [] as { alive: boolean }[];
+    let next = api.rng.float(0.8, 1.6);
+    while (true) {
+      api.stop();
+      next -= api.dt();
+      const brood = (mem.brood as { alive: boolean }[]).filter((b) => b.alive);
+      mem.brood = brood;
+      if (next <= 0) {
+        if (brood.length < SUP.brood.max) {
+          const a = api.rng.angle();
+          const x = api.self.x + Math.cos(a) * 36;
+          const y = api.self.y + Math.sin(a) * 30;
+          yield* api.windup(0.5, { kind: 'circle', x, y, radius: 22 });
+          api.sfx('bubble');
+          const m = api.spawn('miteling', x, y);
+          if (m) brood.push(m);
+          next = SUP.brood.every;
+        } else if (api.canSeePlayer()) {
+          // Nest full: it spits instead.
+          yield* api.windup(0.5);
+          api.shoot({ angle: api.angleToPlayer(), speed: 230, kind: 'spore', count: 3, spread: 0.5 });
+          next = 1.4;
+        } else {
+          next = 0.5;
+        }
+      }
+      yield;
+    }
+  },
+};
+
+/** Area denial: a slug that leaves sticky trails and flicks goo. */
+export const gooSlug: EnemyDef = {
+  id: 'goo-slug',
+  name: 'Goo Slug',
+  firstAppears: S01E01,
+  canon: false,
+  ...PILOT.enemies['goo-slug'],
+  radius: 15,
+  contactDamage: 1,
+  art: ART.gooSlug,
+  deathFx: 'slime',
+  elite: { hpMult: 1.7, scale: 1.2 },
+  brain: function* (api: EnemyApi): Brain {
+    let trail = 0;
+    let flick = api.rng.float(1.2, 2.2);
+    while (true) {
+      api.flank(1);
+      trail -= api.dt();
+      flick -= api.dt();
+      if (trail <= 0) {
+        api.hazard({ kind: 'pool', x: api.self.x, y: api.self.y, radius: 26, seconds: 3, status: 'slimed', color: 0xd8e05a });
+        trail = 0.5;
+      }
+      if (flick <= 0 && api.canSeePlayer() && api.distToPlayer() < 320) {
+        api.stop();
+        yield* api.windup(0.5, () => ({ kind: 'line', x: api.self.x, y: api.self.y, angle: api.angleToPlayer(), length: 180, width: 16 }));
+        api.shoot({ angle: api.angleToPlayer(), speed: 300, kind: 'spore', radius: 11, color: 0xd8e05a, applies: 'slimed' });
+        api.sfx('splat');
+        flick = 2.2;
+      }
+      yield;
+    }
+  },
+};
+
+/** Rusher: a courier who swings wide and body-slams with a parcel. */
+export const courier: EnemyDef = {
+  id: 'gromflomite-courier',
+  name: 'Gromflomite Courier',
+  firstAppears: S01E01,
+  canon: true,
+  ...PILOT.enemies['gromflomite-courier'],
+  radius: 13,
+  contactDamage: 1,
+  art: ART.courier,
+  nameplate: agentNameplate,
+  elite: { hpMult: 2.4, scale: 1.2 },
+  brain: (api) => charger(api, { windup: 0.45, chargeMult: 2.6, chargeTime: 0.32, rest: 0.4, approach: 1, flank: true }),
+};
+
+/** Support: stamps APPROVED shields onto nearby agents. */
+export const notary: EnemyDef = {
+  id: 'gromflomite-notary',
+  name: 'Gromflomite Notary',
+  firstAppears: S01E01,
+  canon: true,
+  ...PILOT.enemies['gromflomite-notary'],
+  radius: 14,
+  contactDamage: 1,
+  art: ART.notary,
+  nameplate: agentNameplate,
+  elite: { hpMult: 2.2, scale: 1.2 },
+  brain: function* (api: EnemyApi): Brain {
+    let stamp = api.rng.float(1.2, 2.2);
+    let fling = 1.5;
+    while (true) {
+      api.keepDistance(200, 340, 0.9);
+      stamp -= api.dt();
+      fling -= api.dt();
+      const target = api.allies(SUP.notary.radius).find((e) => e.hp > 0);
+      if (stamp <= 0 && target) {
+        api.stop();
+        yield* api.windup(0.6, () => ({ kind: 'circle', x: target.x, y: target.y, radius: 34 }));
+        if (target.hp > 0) {
+          target.grantShield(SUP.notary.shieldHits);
+          api.say(LINES.notary.approved, 1);
+          api.sfx('stamp');
+        }
+        stamp = SUP.notary.every;
+      } else if (fling <= 0 && api.canSeePlayer()) {
+        api.stop();
+        yield* api.windup(0.45);
+        api.shoot({ angle: api.angleToPlayer(), speed: 300, kind: 'stamp', applies: 'stamped' });
+        api.sfx('throw');
+        fling = 1.5;
+      }
+      yield;
+    }
+  },
+};
+
+/** Summoner: radios for backup, and flings paperwork while waiting. */
+export const dispatcher: EnemyDef = {
+  id: 'gromflomite-dispatcher',
+  name: 'Gromflomite Dispatcher',
+  firstAppears: S01E01,
+  canon: true,
+  ...PILOT.enemies['gromflomite-dispatcher'],
+  radius: 14,
+  contactDamage: 1,
+  art: ART.dispatcher,
+  nameplate: agentNameplate,
+  elite: { hpMult: 2, scale: 1.2 },
+  brain: function* (api: EnemyApi): Brain {
+    const mem = api.self.memory;
+    mem.calls = [] as { alive: boolean }[];
+    let call = api.rng.float(1.5, 2.5);
+    let fling = 1.4;
+    while (true) {
+      api.keepDistance(260, 420, 0.9);
+      call -= api.dt();
+      fling -= api.dt();
+      const calls = (mem.calls as { alive: boolean }[]).filter((c) => c.alive);
+      mem.calls = calls;
+      if (call <= 0 && calls.length < SUP.dispatch.max) {
+        api.stop();
+        const spot = api.room().randomFloorPoint(api.rng, 200);
+        yield* api.windup(0.8, { kind: 'circle', x: spot.x, y: spot.y, radius: 30 });
+        api.say(api.rng.pick(LINES.dispatcher.backup), 1.6);
+        api.sfx('alarm');
+        const agent = api.spawn(api.rng.pick(['gromflomite-clerk', 'gromflomite-guard']), spot.x, spot.y);
+        if (agent) calls.push(agent);
+        call = SUP.dispatch.every;
+      } else if (fling <= 0 && api.canSeePlayer()) {
+        api.stop();
+        yield* api.windup(0.45);
+        api.shoot({ angle: api.angleToPlayer(), speed: 320, kind: 'paper', count: 2, spread: 0.3 });
+        api.sfx('throw');
+        fling = 1.4;
+      }
+      yield;
+    }
+  },
+};
+
 export const PILOT_ENEMIES: EnemyDef[] = [
   popQuiz,
   hallMonitor,
@@ -447,6 +757,15 @@ export const PILOT_ENEMIES: EnemyDef[] = [
   guard,
   riot,
   sniper,
+  pepSquad,
+  labPartner,
+  bloomTender,
+  broodMound,
+  miteling,
+  gooSlug,
+  courier,
+  notary,
+  dispatcher,
 ];
 
-export const CUSTOMS_AGENTS = [clerk.id, guard.id, riot.id, sniper.id];
+export const CUSTOMS_AGENTS = [clerk.id, guard.id, riot.id, sniper.id, courier.id, notary.id, dispatcher.id];

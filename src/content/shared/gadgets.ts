@@ -7,11 +7,10 @@ export const freezeRay: GadgetDef = {
   name: 'Freeze Ray',
   firstAppears: 'S01E01',
   canon: true,
-  activate: (ctx) => {
-    for (const e of ctx.enemies()) ctx.freeze(e, RICK_METER.freezeSeconds);
-    ctx.sfx('freeze-ray');
-    ctx.flash(0xbfeaff, 160);
-  },
+  color: 0xbfeaff,
+  activate: (ctx) => ctx.sfx('freeze-ray'),
+  // The beam sweeps the room and freezes each enemy it crosses.
+  hit: (ctx, e) => ctx.freeze(e, RICK_METER.freezeSeconds),
   lines: [
     'Chill out. —*urrp*— That\'s a science pun, Morty.',
     'Freeze! I always wanted to say that and mean it.',

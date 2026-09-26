@@ -57,6 +57,10 @@ export class Player implements PlayerRef {
   private locked = false;
   /** Enemies already touched during the current dash. */
   readonly dashHits = new Set<number>();
+  /** Seconds since the current dash started. */
+  dashAge = Infinity;
+  /** Each dash can earn one perfect dodge. */
+  perfectUsed = false;
   private scrambleTimer = 0;
   private scrambleMode = 0;
   private ghostTimer = 0;
@@ -112,6 +116,10 @@ export class Player implements PlayerRef {
   get controlLocked(): boolean {
     return this.locked;
   }
+  /** True right after a dash starts: an attack landing now is a perfect dodge. */
+  get inPerfectWindow(): boolean {
+    return !this.perfectUsed && this.dashAge <= PLAYER.perfectDodgeWindow;
+  }
 
   heal(halves: number): void {
     this.host.healPlayer(halves);
@@ -153,6 +161,7 @@ export class Player implements PlayerRef {
     this.iframes = Math.max(0, this.iframes - dt);
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
     this.fireCooldown = Math.max(0, this.fireCooldown - dt);
+    this.dashAge += dt;
     const decay = Math.exp(-dt * 10);
     this.knockVx *= decay;
     this.knockVy *= decay;
@@ -216,6 +225,8 @@ export class Player implements PlayerRef {
       this.iframes = Math.max(this.iframes, stats.dashIframes);
       this.dashCooldown = stats.dashCooldown;
       this.dashHits.clear();
+      this.dashAge = 0;
+      this.perfectUsed = false;
       this.host.onDash();
     }
 

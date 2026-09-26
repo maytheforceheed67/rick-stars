@@ -41,11 +41,18 @@ export class Projectile {
   source: HitSource = 'shot';
   tag?: string;
   applies?: string;
-  /** Enemies already hit by this projectile (for piercing shots; normally it dies on first hit). */
   readonly img: Phaser.GameObjects.Image;
+  /** Soft additive halo that makes the player's shots read as bright energy. */
+  private readonly glow?: Phaser.GameObjects.Image;
 
-  constructor(scene: Phaser.Scene, depth: number) {
+  constructor(scene: Phaser.Scene, depth: number, glow: boolean) {
     this.img = scene.add.image(0, 0, '__WHITE').setVisible(false).setActive(false).setDepth(depth);
+    if (glow) this.glow = scene.add.image(0, 0, 'fx-dot').setVisible(false).setDepth(depth - 1).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.55);
+  }
+
+  /** Keeps the halo on the shot. */
+  syncGlow(): void {
+    this.glow?.setPosition(this.x, this.y);
   }
 
   launch(o: ProjectileOpts): void {
@@ -68,11 +75,20 @@ export class Projectile {
     if (o.tint !== undefined) this.img.setTint(o.tint);
     else this.img.clearTint();
     this.img.setRotation(this.spin ? 0 : o.angle);
+    if (this.glow) {
+      this.glow.setPosition(o.x, o.y).setScale((o.radius * 3.4) / 8).setVisible(true).setTint(o.tint ?? 0xffffff);
+    }
   }
 
   kill(): void {
     this.active = false;
     this.img.setVisible(false).setActive(false);
+    this.glow?.setVisible(false);
+  }
+
+  destroy(): void {
+    this.img.destroy();
+    this.glow?.destroy();
   }
 }
 
@@ -83,13 +99,14 @@ export class ProjectilePool {
     private readonly scene: Phaser.Scene,
     private readonly depth: number,
     private readonly max: number,
+    private readonly opts: { glow?: boolean } = {},
   ) {}
 
   spawn(o: ProjectileOpts): Projectile | null {
     let p = this.items.find((x) => !x.active);
     if (!p) {
       if (this.items.length >= this.max) return null;
-      p = new Projectile(this.scene, this.depth);
+      p = new Projectile(this.scene, this.depth, !!this.opts.glow);
       this.items.push(p);
     }
     p.launch(o);
@@ -126,6 +143,7 @@ export class ProjectilePool {
       p.x = nx;
       p.y = ny;
       p.img.setPosition(p.x, p.y);
+      p.syncGlow();
       if (p.spin) p.img.angle += p.spin * dt;
       else p.img.setRotation(Math.atan2(p.vy, p.vx));
     }
@@ -149,7 +167,7 @@ export class ProjectilePool {
   }
 
   destroy(): void {
-    for (const p of this.items) p.img.destroy();
+    for (const p of this.items) p.destroy();
     this.items.length = 0;
   }
 }

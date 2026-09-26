@@ -16,7 +16,7 @@ export const BASE_STATS: StatBlock = {
   shotSpeed: 620,
   /** Pixels a shot travels before fizzling. */
   range: 430,
-  shotSize: 7,
+  shotSize: 9,
   moveSpeed: 250,
   dashSpeed: 760,
   dashCooldown: 0.8,
@@ -73,6 +73,10 @@ export const PLAYER = {
   fallTime: 0.65,
   /** Half hearts lost to a fall. */
   fallDamage: 1,
+  /** Dashing through an attack this soon after the dash starts is a perfect dodge. */
+  perfectDodgeWindow: 0.15,
+  /** A perfect dodge slows time to this speed for this many real seconds. */
+  perfectDodgeSlowMo: { factor: 0.3, seconds: 0.4 },
 };
 
 export const ENEMIES = {
@@ -84,17 +88,50 @@ export const ENEMIES = {
   bossShatterMult: 2.5,
   bossFreezeMult: 0.5,
   /** HP bands from the design brief. Tests hold every enemy to these; elites multiply regular HP. */
-  regularHp: [8, 15] as [number, number],
-  bossHp: [180, 300] as [number, number],
+  regularHp: [5, 18] as [number, number],
+  bossHp: [350, 700] as [number, number],
   /** Chance a regular enemy drops Scrap. */
   scrapChance: 0.35,
+  /** Speed multiplier from a support enemy's haste buff. */
+  hasteBuff: 1.3,
+  /** Staggered enemies (after a big attack) take this much more damage. */
+  staggerMult: 1.5,
+  /** A shattering frozen enemy shatters frozen enemies this close to it. */
+  shatterChainRadius: 110,
+  /** Elite modifiers. */
+  elite: {
+    shieldHits: 3,
+    hasteMult: 1.35,
+    /** Each of the two halves of a splitting elite gets this share of its max HP. */
+    splitHpShare: 0.4,
+    explosionRadius: 95,
+    explosionDelay: 0.7,
+  },
   eliteScrap: [2, 3] as [number, number],
+};
+
+/** How combat rooms play out. */
+export const ROOMS = {
+  /** Seconds a spawn warning shows before the enemy appears. */
+  spawnWarning: 0.75,
+  /** Enemies never appear closer than this many tiles to Morty. */
+  safeSpawnTiles: 3,
+  /** Fade-in after a warned spawn (the warning already gave notice). */
+  warnedSpawnDelay: 0.3,
+  /** The next wave comes when this many enemies (or fewer) are left. */
+  nextWaveAt: 1,
+  /** Default chance a combat room is an ambush (acts can override). */
+  ambushChance: 0.16,
+  /** Tiles Morty walks into an ambush room before it springs. */
+  ambushTrigger: 2.4,
 };
 
 export const RICK_METER = {
   /** Damage needed to fill the meter. */
   max: 140,
   freezeSeconds: 4,
+  /** Meter gained from a perfect dodge. */
+  perfectDodge: 18,
 };
 
 export const ECONOMY = {
@@ -136,25 +173,53 @@ export const PILOT = {
     agentRadius: 175,
   },
   bigMegaTree: { fruit: 3, waveEvery: 7.5, maxEnemies: 9 },
+  /** Room hazards. */
+  hazards: {
+    locker: { range: 340, windup: 0.8, cooldown: [3.2, 4.8] as [number, number] },
+    slop: { slow: 0.6, windup: 0.8, every: [4, 6.5] as [number, number] },
+    ledge: { windup: 0.55, regrow: 4 },
+    scanner: { windup: 0.9, arc: 0.75, length: 440, sweep: 1.1, cooldown: [2.4, 3.6] as [number, number] },
+  },
   escape: { seconds: 40, spawnEvery: 1.3, lockdownSpawnEvery: 0.6 },
   bombDefuse: { seconds: 35, wrongPenalty: 6 },
   /** Base HP and move speed (px/s) of the Pilot's regular enemies. */
   enemies: {
-    'pop-quiz': { hp: 8, speed: 150 },
-    'hall-monitor': { hp: 13, speed: 95 },
-    'dodgeball-jock': { hp: 12, speed: 110 },
-    'cafeteria-slop': { hp: 14, speed: 70 },
-    'slop-blob': { hp: 8, speed: 115 },
-    'junk-drone': { hp: 8, speed: 45 },
-    'gloop-hopper': { hp: 12, speed: 90 },
-    'fruit-snatcher': { hp: 10, speed: 165 },
-    'bonk-bloat': { hp: 15, speed: 70 },
-    'puff-polyp': { hp: 12, speed: 0 },
-    'gromflomite-clerk': { hp: 11, speed: 100 },
-    'gromflomite-guard': { hp: 13, speed: 120 },
-    'gromflomite-riot': { hp: 15, speed: 80 },
-    'gromflomite-sniper': { hp: 9, speed: 90 },
+    // School (tuned against dodgeballs)
+    'pop-quiz': { hp: 7, speed: 150 },
+    'hall-monitor': { hp: 12, speed: 95 },
+    'dodgeball-jock': { hp: 10, speed: 110 },
+    'cafeteria-slop': { hp: 13, speed: 70 },
+    'slop-blob': { hp: 6, speed: 115 },
+    'junk-drone': { hp: 7, speed: 45 },
+    'pep-squad': { hp: 9, speed: 105 },
+    'lab-partner': { hp: 10, speed: 90 },
+    // Dimension 35-C (Rick's spare ray gun)
+    'gloop-hopper': { hp: 11, speed: 90 },
+    'fruit-snatcher': { hp: 9, speed: 165 },
+    'bonk-bloat': { hp: 14, speed: 70 },
+    'puff-polyp': { hp: 11, speed: 0 },
+    'bloom-tender': { hp: 10, speed: 70 },
+    'brood-mound': { hp: 14, speed: 0 },
+    miteling: { hp: 5, speed: 150 },
+    'goo-slug': { hp: 12, speed: 55 },
+    // Customs (Rick's own ray gun)
+    'gromflomite-clerk': { hp: 13, speed: 100 },
+    'gromflomite-guard': { hp: 14, speed: 120 },
+    'gromflomite-riot': { hp: 17, speed: 80 },
+    'gromflomite-sniper': { hp: 10, speed: 90 },
+    'gromflomite-courier': { hp: 10, speed: 175 },
+    'gromflomite-notary': { hp: 12, speed: 90 },
+    'gromflomite-dispatcher': { hp: 14, speed: 85 },
   },
-  frank: { hp: 230, speed: 115 },
-  supervisor: { hp: 300, speed: 90 },
+  /** Support and summoner behavior. */
+  support: {
+    cheer: { every: [3.5, 4.5] as [number, number], radius: 210, haste: 4, heal: 3 },
+    pollen: { every: 4, radius: 170, healShare: 0.3 },
+    notary: { every: 3.6, radius: 280, shieldHits: 2 },
+    brood: { every: 2.4, max: 3 },
+    dispatch: { every: 5, max: 2 },
+  },
+  /** Bosses: HP for a 60-90 second fight without items, and where each phase starts. */
+  frank: { hp: 420, speed: 115, phases: [0.66, 0.33], wallStagger: 1.4, flurryStagger: 0.8 },
+  supervisor: { hp: 560, speed: 90, phases: [0.66, 0.33], slamStagger: 1.2 },
 };

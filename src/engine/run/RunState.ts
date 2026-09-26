@@ -46,6 +46,7 @@ export interface RunStats {
   damageTaken: number;
   itemsFound: ContentId[];
   scrapEarned: number;
+  perfectDodges: number;
 }
 
 export class RunState {
@@ -69,7 +70,7 @@ export class RunState {
   /** Items that have been offered this run (so they don't show up twice). */
   readonly offered = new Set<ContentId>();
   lastDamageSource = '';
-  readonly stats: RunStats = { kills: 0, roomsCleared: 0, damageTaken: 0, itemsFound: [], scrapEarned: 0 };
+  readonly stats: RunStats = { kills: 0, roomsCleared: 0, damageTaken: 0, itemsFound: [], scrapEarned: 0, perfectDodges: 0 };
 
   constructor(
     reg: Registry,

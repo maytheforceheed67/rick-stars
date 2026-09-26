@@ -251,6 +251,11 @@ export class HudScene extends Phaser.Scene implements HudApi {
     g.fillRoundedRect(x - 4, y - 4, w + 8, 22, 6);
     g.fillStyle(0xe0484d, 1);
     g.fillRoundedRect(x, y, w * (m.boss.hp / m.boss.maxHp), 14, 4);
+    // Ticks where the fight changes phase.
+    for (const f of m.boss.phases ?? []) {
+      g.fillStyle(0xf4efe6, 0.9);
+      g.fillRect(x + w * f - 1.5, y - 3, 3, 20);
+    }
     g.lineStyle(2, 0xf4efe6, 0.7);
     g.strokeRoundedRect(x - 4, y - 4, w + 8, 22, 6);
     this.texts.bossTitle.setText(m.boss.title);

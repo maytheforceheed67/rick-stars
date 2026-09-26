@@ -215,8 +215,14 @@ export function validateRegistry(reg: Registry): string[] {
       gate(reg.characters, act.playable, 'character', where);
       gate(reg.gadgets, act.rick.gadget, 'gadget', where);
       for (const w of act.enemyPool) {
-        gate(reg.enemies, w.id, 'enemy', where);
+        const e = gate(reg.enemies, w.id, 'enemy', where);
+        if (e?.hazard) err(`${where}: "${w.id}" is a hazard; list it under hazards, not the enemy pool`);
         if (!(w.weight > 0)) err(`${where}: enemy "${w.id}" needs a positive weight`);
+      }
+      for (const w of act.hazards ?? []) {
+        const h = gate(reg.enemies, w.id, 'hazard', where);
+        if (h && !h.hazard) err(`${where}: "${w.id}" is listed as a hazard but isn't one`);
+        if (!(w.weight > 0)) err(`${where}: hazard "${w.id}" needs a positive weight`);
       }
       for (const w of act.itemPool) {
         const item = gate(reg.items, w.id, 'item', where);

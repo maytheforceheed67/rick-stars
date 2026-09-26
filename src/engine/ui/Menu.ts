@@ -207,6 +207,13 @@ export function settingsItems(onBack: () => void): MenuItem[] {
       },
     },
     {
+      label: () => `Damage numbers: ${s().damageNumbers ? 'On' : 'Off'}`,
+      onSelect: () => {
+        s().damageNumbers = !s().damageNumbers;
+        save();
+      },
+    },
+    {
       label: () => `Text speed   ◀ ${s().textSpeed} ▶`,
       onLeft: () => {
         const i = speeds.indexOf(s().textSpeed);

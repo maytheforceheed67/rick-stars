@@ -60,6 +60,21 @@ export class TelegraphLayer {
           g.strokeCircle(s.x, s.y, s.radius - s.thickness / 2);
           g.strokeCircle(s.x, s.y, s.radius + s.thickness / 2);
           break;
+        case 'spawn': {
+          // A dashed ring closing in on the spot, in a calm purple so it never reads as an attack.
+          const r = s.radius * (1.6 - 0.6 * p);
+          const spin = time * 3;
+          g.lineStyle(3, 0xc58bff, 0.85);
+          for (let i = 0; i < 8; i++) {
+            const a = spin + (i / 8) * Math.PI * 2;
+            g.beginPath();
+            g.arc(s.x, s.y, r, a, a + Math.PI / 8, false);
+            g.strokePath();
+          }
+          g.fillStyle(0xc58bff, 0.18 + 0.2 * p);
+          g.fillCircle(s.x, s.y, s.radius * p);
+          break;
+        }
         case 'arc': {
           const a0 = s.angle - s.spread / 2;
           const a1 = s.angle + s.spread / 2;
@@ -133,9 +148,21 @@ interface LaserState {
   fired: boolean;
 }
 
+interface PoolState {
+  kind: 'pool';
+  spec: Extract<HazardSpec, { kind: 'pool' }>;
+  t: number;
+}
+
+interface SweepState {
+  kind: 'sweep';
+  spec: Extract<HazardSpec, { kind: 'sweep' }>;
+  t: number;
+}
+
 export class HazardLayer {
   private readonly g: Phaser.GameObjects.Graphics;
-  private items: (ShockwaveState | LaserState)[] = [];
+  private items: (ShockwaveState | LaserState | SweepState | PoolState)[] = [];
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -154,13 +181,18 @@ export class HazardLayer {
             .setAngle(-8)
         : undefined;
       this.items.push({ kind: 'shockwave', spec, r: 8, hit: false, label });
+    } else if (spec.kind === 'pool') {
+      this.items.push({ kind: 'pool', spec, t: 0 });
+    } else if (spec.kind === 'sweep') {
+      this.items.push({ kind: 'sweep', spec, t: 0 });
+      this.sfx('laser');
     } else {
       this.items.push({ kind: 'laser', spec, t: 0, warned: false, fired: false });
     }
   }
 
   /** Advances hazards and damages the player on contact. */
-  update(dt: number, time: number, player: Vec & { radius: number }, damage: (halves: number) => void, reducedFlash: boolean): void {
+  update(dt: number, time: number, player: Vec & { radius: number }, damage: (halves: number) => void, reducedFlash: boolean, status?: (id: string) => void): void {
     const g = this.g;
     g.clear();
     for (const h of this.items) {
@@ -178,6 +210,39 @@ export class HazardLayer {
         g.lineStyle(3, 0xfff1c9, 0.8 * fade);
         g.strokeCircle(s.x, s.y, h.r);
         if (h.label) h.label.setAlpha(Math.max(0, fade * 1.4)).setScale(1 + (1 - fade) * 0.4);
+      } else if (h.kind === 'pool') {
+        const s = h.spec;
+        h.t += dt;
+        const fade = Math.min(1, (s.seconds - h.t) / 0.5);
+        const color = s.color ?? 0x9bd35a;
+        g.fillStyle(color, 0.32 * fade);
+        g.fillCircle(s.x, s.y, s.radius);
+        g.lineStyle(3, color, 0.8 * fade);
+        g.strokeCircle(s.x, s.y, s.radius);
+        // Bubbles rising and popping make it read as liquid, not just a colored circle.
+        for (let i = 0; i < 4; i++) {
+          const a = time * 1.7 + i * 1.9;
+          const r = ((time * 0.8 + i * 0.37) % 1) * 4 + 2;
+          g.fillStyle(0xffffff, 0.35 * fade);
+          g.fillCircle(s.x + Math.cos(a) * s.radius * 0.55, s.y + Math.sin(a * 1.3) * s.radius * 0.45, r);
+        }
+        if (Math.hypot(player.x - s.x, player.y - s.y) < s.radius + player.radius * 0.5) {
+          if (s.damage) damage(s.damage);
+          if (s.status) status?.(s.status);
+        }
+      } else if (h.kind === 'sweep') {
+        const s = h.spec;
+        h.t += dt;
+        const a = s.from + (s.to - s.from) * Math.min(1, h.t / s.seconds);
+        const x2 = s.x + Math.cos(a) * s.length;
+        const y2 = s.y + Math.sin(a) * s.length;
+        g.lineStyle(s.width + 10, 0xff3355, 0.28);
+        g.lineBetween(s.x, s.y, x2, y2);
+        g.lineStyle(s.width, 0xff6680, 0.95);
+        g.lineBetween(s.x, s.y, x2, y2);
+        g.lineStyle(Math.max(2, s.width / 3), 0xffffff, 0.9);
+        g.lineBetween(s.x, s.y, x2, y2);
+        if (distToSegment(player.x, player.y, s.x, s.y, x2, y2) < s.width / 2 + player.radius) damage(s.damage);
       } else {
         const s = h.spec;
         h.t += dt;
@@ -205,7 +270,7 @@ export class HazardLayer {
       }
     }
     this.items = this.items.filter((h) => {
-      const done = h.kind === 'shockwave' ? h.r >= h.spec.maxRadius : h.t >= h.spec.warn + h.spec.active;
+      const done = h.kind === 'shockwave' ? h.r >= h.spec.maxRadius : h.kind === 'sweep' || h.kind === 'pool' ? h.t >= h.spec.seconds : h.t >= h.spec.warn + h.spec.active;
       if (done && h.kind === 'shockwave') h.label?.destroy();
       return !done;
     });

@@ -285,6 +285,115 @@ export const PILOT_ENEMY_ART: Record<string, SpriteArt> = {
         wonkyRect(gg, w * 0.3, h * 0.2, w * 0.4, 6, { fill: 0xff3355, fillAlpha: 0.8, seed: 936, radius: 2, lineWidth: 2 });
       }),
   },
+  // School support and area denial.
+  pepSquad: {
+    key: 'enemy-pep-squad',
+    width: 44,
+    height: 52,
+    draw: (g, w, h) => {
+      drawPerson(g, w, h, { seed: 841, skin: 0xe7b891, hair: 0x7a3f1d, hairStyle: 'ponytail', shirt: 0xf2c14e, stripe: [0x2f4a86], pants: 0x2f4a86, shoes: 0xf4f4f4, eyes: 'happy', mouth: 'smile', brow: 0x5a2c12, lashes: true });
+      for (const side of [-1, 1]) blob(g, w / 2 + side * w * 0.4, h * 0.66, 7, 6, { fill: 0xf2c14e, seed: 845 + side, wobble: 0.3, lineWidth: 2 });
+    },
+  },
+  labPartner: {
+    key: 'enemy-lab-partner',
+    width: 42,
+    height: 52,
+    draw: (g, w, h) => {
+      drawPerson(g, w, h, { seed: 851, skin: 0xc98f63, hair: 0x2b1d12, hairStyle: 'buzz', shirt: 0x6fa8c9, coat: 0xeef3f6, pants: 0x3a3f58, eyes: 'angry', mouth: 'grit', brow: 0x1a120c });
+      // Goggles and a bubbling beaker.
+      wonkyRect(g, w * 0.22, h * 0.24, w * 0.56, 6, { fill: 0x9fdcff, fillAlpha: 0.7, seed: 853, radius: 3, lineWidth: 2 });
+      wonkyPoly(g, [[w * 0.78, h * 0.56], [w * 0.9, h * 0.56], [w * 0.95, h * 0.74], [w * 0.73, h * 0.74]], { fill: 0x9bd35a, seed: 854, lineWidth: 2 });
+      dot(g, w * 0.84, h * 0.52, 2.5, 0xd8f0a0);
+    },
+  },
+  // 35-C support, summoner and area denial.
+  bloomTender: {
+    key: 'enemy-bloom-tender',
+    width: 40,
+    height: 42,
+    draw: (g, w, h) => {
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        blob(g, w / 2 + Math.cos(a) * 11, h * 0.3 + Math.sin(a) * 9, 7, 6, { fill: 0xfff1a8, seed: 861 + i, lineWidth: 2 });
+      }
+      dot(g, w / 2, h * 0.3, 7, 0xf2a93b);
+      blob(g, w / 2, h * 0.68, w * 0.3, h * 0.28, { fill: 0x9de0a8, seed: 868, lineWidth: 2.5 });
+      eye(g, w * 0.4, h * 0.64, 4.5, 'happy');
+      eye(g, w * 0.6, h * 0.64, 4.5, 'happy', { x: 0, y: 0 }, true);
+    },
+  },
+  broodMound: {
+    key: 'enemy-brood-mound',
+    width: 60,
+    height: 44,
+    draw: (g, w, h) => {
+      blob(g, w / 2, h * 0.6, w * 0.46, h * 0.38, { fill: 0xb57ad9, seed: 871, wobble: 0.14, lineWidth: 3 });
+      for (const [x, y] of [[0.3, 0.52], [0.55, 0.42], [0.72, 0.62], [0.42, 0.72]] as const) {
+        blob(g, w * x, h * y, 5.5, 4.5, { fill: 0x3a1f4d, seed: 872 + x * 10, lineWidth: 2 });
+      }
+      eye(g, w * 0.55, h * 0.42, 2.5, 'angry');
+    },
+  },
+  miteling: {
+    key: 'enemy-miteling',
+    width: 20,
+    height: 18,
+    draw: (g, w, h) => {
+      stroke(g, [[w * 0.38, 5], [w * 0.28, 1]], INK, 1.5);
+      stroke(g, [[w * 0.62, 5], [w * 0.72, 1]], INK, 1.5);
+      blob(g, w / 2, h * 0.58, w * 0.4, h * 0.36, { fill: 0xe07ac0, seed: 881, lineWidth: 2 });
+      dot(g, w * 0.4, h * 0.52, 2, INK);
+      dot(g, w * 0.6, h * 0.52, 2, INK);
+    },
+  },
+  gooSlug: {
+    key: 'enemy-goo-slug',
+    width: 50,
+    height: 34,
+    draw: (g, w, h) => {
+      blob(g, w / 2, h * 0.66, w * 0.46, h * 0.3, { fill: 0xd8e05a, seed: 891, wobble: 0.1, lineWidth: 2.5 });
+      stroke(g, [[w * 0.66, h * 0.5], [w * 0.62, h * 0.14]], INK, 2.5);
+      stroke(g, [[w * 0.78, h * 0.52], [w * 0.84, h * 0.16]], INK, 2.5);
+      eye(g, w * 0.62, h * 0.14, 4, 'normal');
+      eye(g, w * 0.84, h * 0.16, 4, 'normal', { x: 0, y: 0 }, true);
+      g.fillStyle(0xffffff, 0.5);
+      g.fillEllipse(w * 0.36, h * 0.58, 12, 4);
+    },
+  },
+  // Customs rusher, support and summoner.
+  courier: {
+    key: 'enemy-gromflomite-courier',
+    width: 44,
+    height: 56,
+    draw: (g, w, h) =>
+      drawAgent(g, w, h, 941, 0x8a6a3a, (gg) => {
+        wonkyRect(gg, w * 0.62, h * 0.5, 16, 13, { fill: 0xc9a86b, seed: 945, radius: 1, lineWidth: 2 });
+        stroke(gg, [[w * 0.62, h * 0.5 + 6], [w * 0.62 + 16, h * 0.5 + 6]], 0x6a4a22, 2);
+      }, 0x6a4a22),
+  },
+  notary: {
+    key: 'enemy-gromflomite-notary',
+    width: 44,
+    height: 56,
+    draw: (g, w, h) =>
+      drawAgent(g, w, h, 951, 0x2f6b5a, (gg) => {
+        wonkyRect(gg, w * 0.66, h * 0.46, 10, 14, { fill: 0x7a4a2a, seed: 955, radius: 2, lineWidth: 2 });
+        wonkyRect(gg, w * 0.6, h * 0.6, 18, 7, { fill: 0x5bbf6a, seed: 956, radius: 2, lineWidth: 2 });
+        wonkyRect(gg, w * 0.3, h * 0.2, w * 0.4, 5, { fill: 0x5bbf6a, fillAlpha: 0.85, seed: 957, radius: 2, lineWidth: 2 });
+      }),
+  },
+  dispatcher: {
+    key: 'enemy-gromflomite-dispatcher',
+    width: 44,
+    height: 58,
+    draw: (g, w, h) =>
+      drawAgent(g, w, h, 961, 0xd9772a, (gg) => {
+        stroke(gg, [[w * 0.76, h * 0.52], [w * 0.8, h * 0.22]], INK, 2);
+        dot(gg, w * 0.8, h * 0.2, 3, 0xff3355);
+        wonkyRect(gg, w * 0.68, h * 0.5, 12, 16, { fill: 0x3a3a48, seed: 965, radius: 2, lineWidth: 2 });
+      }, 0x9a4a1a),
+  },
   frank: { key: 'boss-frank', width: 66, height: 84, draw: (g, w, h) => drawFrank(g, w, h) },
   supervisor: {
     key: 'boss-customs-supervisor',

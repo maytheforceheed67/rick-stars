@@ -4,7 +4,7 @@
  * The engine never special-cases an episode: everything episode-specific comes in as content.
  */
 import Phaser from 'phaser';
-import { BASE_STATS, ECONOMY, ENEMIES, PLAYER, RICK_METER, STAT_LIMITS } from '../content/balance';
+import { BASE_STATS, ECONOMY, ENEMIES, PLAYER, RICK_METER, ROOMS, STAT_LIMITS } from '../content/balance';
 import { GAME_HEIGHT, GAME_WIDTH, HUD_HEIGHT, TILE } from '../engine/constants';
 import { buildFixedFloor, generateFloor, type FloorConfig, type FloorRoom } from '../engine/dungeon/generate';
 import { DIR_VEC, doorCell, OPPOSITE, type Dir, type ParsedTemplate } from '../engine/dungeon/templates';
@@ -16,7 +16,7 @@ import { enemyPoolFor, itemPoolFor, type ItemFilter } from '../engine/pools';
 import type { Registry } from '../engine/registry';
 import type { Rng } from '../engine/rng';
 import { freshRoomState, RunState, type PedestalState, type RoomState } from '../engine/run/RunState';
-import { Enemy, type EnemyHost } from '../engine/runtime/Enemy';
+import { Enemy, type EnemyHost, type SpawnOpts } from '../engine/runtime/Enemy';
 import { Fx, type BurstStyle } from '../engine/runtime/Fx';
 import { Player, type PlayerHost, type PlayerInput } from '../engine/runtime/Player';
 import { ProjectilePool } from '../engine/runtime/Projectiles';
@@ -32,7 +32,9 @@ import type {
   EnemySelf,
   EnemyShotSpec,
   EpisodeId,
+  EliteMod,
   ExplosionSpec,
+  GadgetDef,
   GameCtx,
   HitInfo,
   HitSource,
@@ -80,6 +82,14 @@ export interface RunSummary {
 }
 
 const MAX_ENEMIES = 45;
+
+/** One enemy a combat room will bring in. */
+interface SpawnPlan {
+  id: ContentId;
+  x: number;
+  y: number;
+  elite: boolean;
+}
 const SPIN: Record<string, number> = { paper: 540, book: 420, stamp: 360, ball: 600, spore: 200 };
 
 export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
@@ -129,6 +139,22 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private dead = false;
   private meterAnnounced = false;
   private interactable: Interactable | null = null;
+  /** Recoil offset for the camera; decays every frame. */
+  private camKick = { x: 0, y: 0 };
+  /** Resting scroll of a fixed camera (null while it follows Morty). */
+  private camRest: Vec | null = null;
+  /** Game speed during a perfect-dodge slow-mo (1 = normal) and when it ends, in real ms. */
+  private timeFactor = 1;
+  private slowMoUntil = 0;
+  /** True while Rick's entrance stops time. */
+  private worldHold = false;
+  /** Enemies still to come in this room, wave by wave. */
+  private waves: SpawnPlan[][] = [];
+  private waveTotal = 0;
+  /** Spawns whose warning is still showing. */
+  private pendingSpawns = 0;
+  /** An ambush room waiting for Morty to walk in (where he entered). */
+  private ambushFrom: Vec | null = null;
   /** A swap waiting for its confirming second E press. */
   private pendingSwap: PedestalObj | null = null;
   private pendingSwapUntil = 0;
@@ -173,6 +199,14 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.meterAnnounced = false;
     this.interactable = null;
     this.pendingSwap = null;
+    this.camKick = { x: 0, y: 0 };
+    this.camRest = null;
+    this.timeFactor = 1;
+    this.slowMoUntil = 0;
+    this.worldHold = false;
+    this.waves = [];
+    this.pendingSpawns = 0;
+    this.ambushFrom = null;
   }
 
   create(): void {
@@ -204,7 +238,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
     this.cameras.main.setViewport(0, HUD_HEIGHT, GAME_WIDTH, GAME_HEIGHT - HUD_HEIGHT);
     this.enemyGroup = this.physics.add.group();
-    this.playerShots = new ProjectilePool(this, 4000, 260);
+    this.playerShots = new ProjectilePool(this, 4000, 260, { glow: true });
     this.enemyShots = new ProjectilePool(this, 4200, 420);
     this.telegraphs = new TelegraphLayer(this);
     this.hazards = new HazardLayer(this, (id) => this.sfx(id));
@@ -225,6 +259,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   private cleanup(): void {
     // Phaser tears down this scene's objects itself; this just releases what it doesn't know about.
+    this.timeFactor = 1;
+    this.tweens.timeScale = 1;
+    if (this.physics?.world) this.physics.world.timeScale = 1;
     this.teardownRoom();
     this.playerShots?.destroy();
     this.enemyShots?.destroy();
@@ -348,7 +385,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
         if (run.statuses.remove(id)) this.invalidateStats();
       },
       hasStatus: (id) => run.statuses.has(id),
-      enemies: () => this.enemies.filter((e) => e.alive && !e.passive),
+      enemies: () => this.enemies.filter((e) => this.isTarget(e)),
       damageEnemy: (e, amount, source, tag) => this.hitEnemy(e as Enemy, amount, { source, tag }),
       freeze: (e, s) => {
         if ((e as Enemy).alive) (e as Enemy).freeze(s);
@@ -471,10 +508,16 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   // ---- main loop -------------------------------------------------------------------------------
 
-  override update(_time: number, delta: number): void {
-    const dt = Math.min(delta / 1000, 1 / 20);
+  override update(time: number, delta: number): void {
+    this.updateSlowMo(time);
+    const dt = Math.min(delta / 1000, 1 / 20) * this.timeFactor;
     this.frameDelta = dt;
     this.fx.update(dt);
+    this.applyCameraKick(delta / 1000);
+    if (this.worldHold) {
+      if (!this.physics.world.isPaused) this.physics.world.pause();
+      return;
+    }
     if (this.fx.stopped || this.transitioning || !this.roomView) return;
     const run = this.run;
     run.time += dt;
@@ -519,7 +562,14 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     );
     this.checkEnemyShots();
     const reduced = this.settings().reducedFlash;
-    this.hazards.update(dt, run.time, { x: this.player.x, y: this.player.y, radius: this.player.radius }, (h) => this.damagePlayer(h, 'a hazard'), reduced);
+    this.hazards.update(
+      dt,
+      run.time,
+      { x: this.player.x, y: this.player.y, radius: this.player.radius },
+      (h) => this.damagePlayer(h, 'a hazard'),
+      reduced,
+      (id) => this.applyStatus(id),
+    );
     this.telegraphs.draw(run.time, reduced);
 
     this.objects.update(dt, this.player, this.stats().magnet, (p) => this.collectPickup(p));
@@ -533,6 +583,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       (p) => this.takePedestal(p),
     );
 
+    this.updateEncounter();
     this.updateDoors(false);
     this.checkRoomClear();
     this.checkDoorTransition();
@@ -646,7 +697,15 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.restoreContents(st);
     if (st.kind === 'treasure') this.stockTreasure(st);
     if (st.kind === 'shop') this.stockShop(st, firstVisit);
-    if (st.kind === 'combat' && !st.cleared) this.spawnMarkerEnemies(tpl);
+    if (st.kind === 'combat' && !st.cleared) {
+      // Whether a room is an ambush is decided once, on the first visit.
+      if (st.data.ambush === undefined) {
+        const chance = this.run.act.ambushChance ?? ROOMS.ambushChance;
+        st.data.ambush = firstVisit && this.run.stats.roomsCleared >= 1 && fr?.kind === 'combat' && this.run.play.chance(chance);
+      }
+      this.planWaves(tpl, st.data.ambush === true);
+      this.placeHazards(tpl);
+    }
 
     this.script = null;
     if (fr?.kind === 'special' && fr.specialId) {
@@ -658,7 +717,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     if (stageIndex >= 0) this.startStage(stageIndex, st, firstVisit);
     this.script?.onEnter?.(firstVisit);
     this.mechanics.forEach((m) => m.inst.onRoomEnter?.(this.roomInfoObj!));
-    if (st.kind === 'combat' && !st.cleared && this.hostileCount() === 0) st.cleared = true;
+    if (st.kind === 'combat' && !st.cleared && this.hostileCount() === 0 && !this.encounterPending()) st.cleared = true;
 
     this.doorsOpen = true;
     this.updateDoors(true);
@@ -709,11 +768,15 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const vw = cam.width;
     const vh = cam.height;
     cam.stopFollow();
+    this.camKick = { x: 0, y: 0 };
+    cam.setFollowOffset(0, 0);
     if (view.widthPx <= vw && view.heightPx <= vh) {
       cam.removeBounds();
       cam.centerOn(view.widthPx / 2, view.heightPx / 2);
+      this.camRest = { x: cam.scrollX, y: cam.scrollY };
       return;
     }
+    this.camRest = null;
     const bx = view.widthPx < vw ? (view.widthPx - vw) / 2 : 0;
     const by = view.heightPx < vh ? (view.heightPx - vh) / 2 : 0;
     cam.setBounds(bx, by, Math.max(view.widthPx, vw), Math.max(view.heightPx, vh));
@@ -794,6 +857,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.hudTimer = null;
     this.hintText = null;
     this.timers = this.timers.filter((t) => !t.room);
+    this.waves = [];
+    this.pendingSpawns = 0;
+    this.ambushFrom = null;
     for (const key of [...this.actors.keys()]) if (key !== this.run?.act.playable && key !== 'rick') this.actors.delete(key);
     this.hud?.hideChoice();
   }
@@ -852,13 +918,31 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   hostileCount(): number {
     let n = 0;
-    for (const e of this.enemies) if (e.alive && !e.passive) n++;
+    for (const e of this.enemies) if (this.isTarget(e)) n++;
     return n;
+  }
+
+  enemiesNear(x: number, y: number, radius: number): Enemy[] {
+    return this.enemies.filter((e) => this.isTarget(e) && Math.hypot(e.x - x, e.y - y) <= radius);
+  }
+
+  /** A live, hostile enemy (not a calm NPC or a room hazard). */
+  private isTarget(e: Enemy): boolean {
+    return e.alive && !e.passive && !e.def.hazard;
+  }
+
+  /** Morty falls if he's within `radius` of (x, y) and nothing lets him stand on a drop. */
+  pitfall(x: number, y: number, radius: number): void {
+    const p = this.player;
+    if (this.dead || p.falling > 0 || Math.hypot(p.x - x, p.y - y) > radius + p.radius * 0.5) return;
+    if (this.mechanics.some((m) => m.inst.allowsTile?.('cliff') === true)) return;
+    this.playerFalls();
   }
 
   private updateDoors(force: boolean): void {
     if (!this.roomView) return;
-    const lock = this.scriptLock || (!this.roomState.cleared && this.hostileCount() > 0);
+    const fighting = this.hostileCount() > 0 || this.pendingSpawns > 0 || (this.waves.length > 0 && !this.ambushFrom);
+    const lock = this.scriptLock || (!this.roomState.cleared && fighting);
     if (!force && lock === !this.doorsOpen) return;
     this.doorsOpen = !lock;
     this.roomView.setDoorsOpen(this.doorsOpen);
@@ -868,7 +952,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private checkRoomClear(): void {
     const st = this.roomState;
     if (!this.roomView || st.cleared || st.kind !== 'combat') return;
-    if (this.hostileCount() > 0) return;
+    if (this.hostileCount() > 0 || this.encounterPending()) return;
     if (this.script?.onEnemiesCleared?.()) return;
     this.clearRoom(true);
   }
@@ -877,6 +961,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const st = this.roomState;
     if (st.cleared) return;
     st.cleared = true;
+    for (const e of [...this.enemies]) if (e.alive && e.def.hazard) this.despawnEnemy(e);
     const run = this.run;
     run.stats.roomsCleared++;
     this.sfx('room-clear');
@@ -933,17 +1018,157 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     return best;
   }
 
-  private spawnMarkerEnemies(tpl: ParsedTemplate): void {
+  /**
+   * Plans a combat room's enemies from its spawn markers and splits them into 1-3 waves. Later
+   * waves bring one extra enemy each, so waves never make a room easier.
+   */
+  private planWaves(tpl: ParsedTemplate, ambush: boolean): void {
     const run = this.run;
     const pool = enemyPoolFor(this.reg, run.episode.id, run.act);
-    if (!pool.length) return;
     const marks = tpl.markers.filter((m) => m.ch === 'e' || m.ch === 'E');
-    marks.forEach((m, i) => {
-      const pos = this.roomView!.cellCenter(m.col, m.row);
-      const id = run.play.weighted(pool);
-      const elite = m.ch === 'E' || (run.stats.roomsCleared > 0 && run.play.chance(run.act.eliteChance));
-      this.spawnEnemy(id, pos.x, pos.y, { elite, delay: ENEMIES.spawnDelay + i * 0.07 });
-    });
+    if (!pool.length || !marks.length) return;
+    const rng = run.play;
+    let count = marks.length <= 3 ? 1 : marks.length <= 6 ? rng.int(1, 2) : rng.int(2, 3);
+    if (ambush) count = Math.max(2, count);
+    const at = (m: { col: number; row: number }) => this.roomView!.cellCenter(m.col, m.row);
+    const plans: SpawnPlan[] = marks.map((m) => ({
+      id: rng.weighted(pool),
+      ...at(m),
+      elite: m.ch === 'E' || (run.stats.roomsCleared > 0 && rng.chance(run.act.eliteChance)),
+    }));
+    for (let w = 1; w < count; w++) plans.push({ id: rng.weighted(pool), ...at(rng.pick(marks)), elite: false });
+    this.waves = Array.from({ length: count }, (_, k) => plans.filter((_, i) => i % count === k));
+    this.waveTotal = count;
+    if (ambush) this.ambushFrom = { x: this.player.x, y: this.player.y };
+    else this.nextWave();
+  }
+
+  /** Some combat rooms get one or two of the act's hazards (lockers, spills, scanners...). */
+  private placeHazards(tpl: ParsedTemplate): void {
+    const act = this.run.act;
+    const rng = this.run.play;
+    if (!act.hazards?.length || !rng.chance(act.hazardChance ?? 0.5)) return;
+    const used = new Set<string>();
+    const n = rng.int(1, 2);
+    for (let i = 0; i < n; i++) {
+      const id = rng.weighted(act.hazards);
+      const def = this.reg.enemies.get(id);
+      if (!def?.hazard) continue;
+      const cell = this.hazardCell(tpl, def.hazard.placement, used);
+      if (cell) this.spawnEnemy(id, cell.x, cell.y, { delay: 0.2 });
+    }
+  }
+
+  /** A random floor cell for a hazard, away from doors, markers and Morty. */
+  private hazardCell(tpl: ParsedTemplate, placement: 'wall' | 'floor' | 'cliff-edge', used: Set<string>): Vec | null {
+    const view = this.roomView!;
+    const tiles = tpl.tiles;
+    const doors = (['N', 'S', 'E', 'W'] as Dir[]).map((d) => doorCell(tpl.cols, tpl.rows, d));
+    const marked = new Set(tpl.markers.map((m) => `${m.col},${m.row}`));
+    const at = (c: number, r: number) => (r < 0 || c < 0 || r >= tpl.rows || c >= tpl.cols ? 'wall' : tiles[r][c]);
+    const cells: { p: Vec; key: string }[] = [];
+    for (let r = 0; r < tpl.rows; r++) {
+      for (let c = 0; c < tpl.cols; c++) {
+        const key = `${c},${r}`;
+        if (tiles[r][c] !== 'floor' || marked.has(key) || used.has(key)) continue;
+        if (doors.some((d) => Math.abs(d.col - c) + Math.abs(d.row - r) < 3)) continue;
+        const near = [at(c - 1, r), at(c + 1, r), at(c, r - 1), at(c, r + 1)];
+        if (placement === 'wall' && !near.includes('wall')) continue;
+        if (placement === 'cliff-edge' && !near.includes('cliff')) continue;
+        const p = view.cellCenter(c, r);
+        if (Math.hypot(p.x - this.player.x, p.y - this.player.y) < ROOMS.safeSpawnTiles * TILE) continue;
+        cells.push({ p, key });
+      }
+    }
+    if (!cells.length) return null;
+    const pick = this.run.play.pick(cells);
+    used.add(pick.key);
+    return pick.p;
+  }
+
+  /** True while a room still has enemies on the way. */
+  private encounterPending(): boolean {
+    return this.waves.length > 0 || this.pendingSpawns > 0 || this.ambushFrom !== null;
+  }
+
+  private nextWave(): void {
+    const wave = this.waves.shift();
+    if (!wave) return;
+    const n = this.waveTotal - this.waves.length;
+    if (n > 1) this.hud.toast(`Wave ${n} of ${this.waveTotal}`, { color: 0xc58bff, seconds: 1.3 });
+    wave.forEach((plan, i) => this.warnSpawn(plan, i * 0.07));
+  }
+
+  /** Shows where an enemy will appear, then brings it in. */
+  private warnSpawn(plan: SpawnPlan, lag: number): void {
+    const at = this.safeSpawnPoint(plan.x, plan.y);
+    this.pendingSpawns++;
+    const tele = this.telegraphs.add({ kind: 'spawn', x: at.x, y: at.y, radius: 24 }, () => true);
+    const total = ROOMS.spawnWarning + lag;
+    const counter = { t: 0 };
+    this.tweens.add({ targets: counter, t: 1, duration: total * 1000, onUpdate: () => tele.setProgress(counter.t) });
+    this.after(
+      total,
+      () => {
+        tele.destroy();
+        this.pendingSpawns = Math.max(0, this.pendingSpawns - 1);
+        this.fx.ring(at.x, at.y, 0xc58bff, 34, 220);
+        this.fx.burst('smoke', at.x, at.y, 4);
+        this.spawnEnemy(plan.id, at.x, at.y, { elite: plan.elite, delay: ROOMS.warnedSpawnDelay });
+      },
+      true,
+    );
+  }
+
+  /** The spot itself, or the closest open floor that keeps a safe distance from Morty. */
+  private safeSpawnPoint(x: number, y: number): Vec {
+    const view = this.roomView!;
+    const p = this.player;
+    const safe = ROOMS.safeSpawnTiles * TILE;
+    if (Math.hypot(x - p.x, y - p.y) >= safe) return { x, y };
+    let best: Vec | null = null;
+    let bestD = Infinity;
+    let far: Vec = { x, y };
+    let farD = -1;
+    for (let r = 1; r < view.rows - 1; r++) {
+      for (let c = 1; c < view.cols - 1; c++) {
+        if (view.template.tiles[r][c] !== 'floor') continue;
+        const cell = view.cellCenter(c, r);
+        const fromMorty = Math.hypot(cell.x - p.x, cell.y - p.y);
+        if (fromMorty > farD) {
+          farD = fromMorty;
+          far = cell;
+        }
+        if (fromMorty < safe) continue;
+        const d = Math.hypot(cell.x - x, cell.y - y);
+        if (d < bestD) {
+          bestD = d;
+          best = cell;
+        }
+      }
+    }
+    return best ?? far;
+  }
+
+  /** Waves roll in as the previous one thins out; ambushes spring when Morty walks in. */
+  private updateEncounter(): void {
+    if (!this.roomView || this.roomState.cleared) return;
+    if (this.ambushFrom) {
+      const p = this.player;
+      if (Math.hypot(p.x - this.ambushFrom.x, p.y - this.ambushFrom.y) > ROOMS.ambushTrigger * TILE) this.springAmbush();
+      return;
+    }
+    if (this.waves.length && this.pendingSpawns === 0 && this.hostileCount() <= ROOMS.nextWaveAt) this.nextWave();
+  }
+
+  private springAmbush(): void {
+    this.ambushFrom = null;
+    this.hud.banner('AMBUSH!', 'The doors slam shut behind you.');
+    this.sfx('door-close');
+    this.sfx('alarm');
+    this.fx.shake(10, 260);
+    this.updateDoors(true);
+    this.nextWave();
   }
 
   private stockTreasure(st: RoomState): void {
@@ -1196,6 +1421,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       });
     }
     this.sfx((weaponDef?.weapon?.damageMult ?? 1) > 1.2 ? 'shoot-heavy' : 'shoot');
+    const color = weaponDef?.weapon?.color ?? 0x97ce4c;
+    this.fx.pop(p.x + Math.cos(angle) * 24, p.y + Math.sin(angle) * 24 - 6, 'fx-star', color, 0.5, 1.5, 90, angle);
+    this.kickCamera(angle + Math.PI, 2.2);
     runHook(this.sources(), 'onFire', this.ctx, { angle, x: p.x, y: p.y });
     this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'fire', angle }));
   }
@@ -1209,7 +1437,10 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   damagePlayer(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): void {
     if (this.dead || this.ended || halves <= 0 || this.godModeOn) return;
     const p = this.player;
-    if (!opts?.ignoreInvulnerability && p.isInvulnerable) return;
+    if (!opts?.ignoreInvulnerability && p.isInvulnerable) {
+      if (p.inPerfectWindow) this.perfectDodge();
+      return;
+    }
     const run = this.run;
     run.hp -= halves;
     run.lastDamageSource = source;
@@ -1254,10 +1485,15 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   // ---- combat ----------------------------------------------------------------------------------
 
-  spawnEnemy(id: ContentId, x: number, y: number, opts: { elite?: boolean; passive?: boolean; delay?: number } = {}): Enemy | null {
+  spawnEnemy(id: ContentId, x: number, y: number, opts: SpawnOpts = {}): Enemy | null {
     if (this.hostileCount() >= MAX_ENEMIES || !this.roomView) return null;
     const def = this.reg.enemies.get(id);
     if (!def) return null;
+    if (opts.elite && def.elite && !opts.mod) {
+      // Every elite gets a visible twist. Enemies that already split on death don't split twice.
+      const allowed: EliteMod[] = def.elite.mods ?? (def.onDeath ? ['shielded', 'hasty', 'explosive'] : ['shielded', 'hasty', 'splitting', 'explosive']);
+      opts = { ...opts, mod: this.run.play.pick(allowed) };
+    }
     const e = new Enemy(this, this, def, x, y, opts);
     this.enemies.push(e);
     this.enemyGroup.add(e);
@@ -1329,7 +1565,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private checkPlayerShots(): void {
     this.playerShots.forEachActive((p) => {
       for (const e of this.enemies) {
-        if (!e.alive || e.passive || e.spawnLeft > 0) continue;
+        if (!this.isTarget(e) || e.spawnLeft > 0) continue;
         if (Math.hypot(p.x - e.x, p.y - e.y) > p.radius + e.radius) continue;
         if (e.def.shieldArc && !e.frozen) {
           const from = Math.atan2(p.y - e.y, p.x - e.x);
@@ -1343,7 +1579,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
           }
         }
         this.hitEnemy(e, p.damage, { source: p.source, tag: p.tag, bounced: p.bounced, angle: Math.atan2(p.vy, p.vx) });
-        this.fx.burst('hit', p.x, p.y, 4);
+        this.fx.burst('spark', p.x, p.y, 5);
+        this.fx.ring(p.x, p.y, 0xfff2a8, 16, 150);
         p.kill();
         return;
       }
@@ -1354,7 +1591,10 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const pl = this.player;
     this.enemyShots.forEachActive((p) => {
       if (Math.hypot(p.x - pl.x, p.y - pl.y) > p.radius + pl.radius * 0.75) return;
-      if (pl.isInvulnerable) return;
+      if (pl.isInvulnerable) {
+        if (pl.inPerfectWindow) this.perfectDodge();
+        return;
+      }
       this.damagePlayer(p.damage, p.tag ?? 'a stray shot');
       if (p.applies) this.applyStatus(p.applies);
       p.kill();
@@ -1364,15 +1604,19 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private checkContacts(): void {
     const p = this.player;
     for (const e of this.enemies) {
-      if (!e.alive || e.passive || e.spawnLeft > 0 || e.frozen || e.def.contactDamage <= 0) continue;
-      if (Math.hypot(e.x - p.x, e.y - p.y) < e.radius + p.radius * 0.8 && !p.isInvulnerable) {
+      if (!this.isTarget(e) || e.spawnLeft > 0 || e.frozen || e.def.contactDamage <= 0) continue;
+      if (Math.hypot(e.x - p.x, e.y - p.y) < e.radius + p.radius * 0.8) {
+        if (p.isInvulnerable) {
+          if (p.inPerfectWindow) this.perfectDodge();
+          continue;
+        }
         this.damagePlayer(e.def.contactDamage, e.def.name);
         p.knockback(Math.atan2(p.y - e.y, p.x - e.x), 320);
       }
     }
     if (p.isDashing) {
       for (const e of this.enemies) {
-        if (!e.alive || e.passive || p.dashHits.has(e.uid)) continue;
+        if (!this.isTarget(e) || p.dashHits.has(e.uid)) continue;
         if (Math.hypot(e.x - p.x, e.y - p.y) < e.radius + p.radius + 4) {
           p.dashHits.add(e.uid);
           runHook(this.sources(), 'onDashContact', this.ctx, e);
@@ -1385,10 +1629,10 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const list = this.enemies;
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
-      if (!a.alive || a.boss || a.def.flying) continue;
+      if (!a.alive || a.boss || a.def.flying || a.def.hazard) continue;
       for (let j = i + 1; j < list.length; j++) {
         const b = list[j];
-        if (!b.alive || b.boss || b.def.flying) continue;
+        if (!b.alive || b.boss || b.def.flying || b.def.hazard) continue;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const d = Math.hypot(dx, dy) || 0.01;
@@ -1405,8 +1649,21 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   hitEnemy(e: Enemy, damage: number, opts: { source: HitSource; tag?: string; bounced?: boolean; angle?: number }): void {
     if (!e.alive || e.invulnerable || e.passive || damage <= 0) return;
+    if (e.shieldHits > 0) {
+      if (opts.source === 'explosion' || opts.source === 'rick') {
+        e.breakShield();
+      } else if (opts.source !== 'poison') {
+        // The bubble soaks the hit.
+        const popped = e.absorbHit();
+        this.fx.burst('spark', e.x, e.y - 10, popped ? 12 : 4);
+        if (popped) this.fx.ring(e.x, e.y - 10, 0x7fdcff, e.radius * 2.6, 260, 4);
+        this.sfx(popped ? 'shield-pop' : 'bounce');
+        return;
+      }
+    }
     const wasFrozen = e.frozen;
     let dmg = damage;
+    if (e.staggerLeft > 0 && opts.source !== 'poison') dmg *= ENEMIES.staggerMult;
     let shatter = false;
     if (wasFrozen && opts.source !== 'poison') {
       if (e.boss) {
@@ -1433,8 +1690,12 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       if (st.poisonChance > 0 && rng.chance(st.poisonChance)) e.poison(3, 3);
       if (st.slowChance > 0 && rng.chance(st.slowChance)) e.slow(0.6, 2);
     }
+    if (this.settings().damageNumbers && opts.source !== 'poison') {
+      this.fx.floatText(e.x + this.run.play.float(-10, 10), e.y - e.displayHeight * e.originY, String(Math.round(dmg)), dmg >= 8 ? '#ffd166' : '#ffffff', dmg >= 8 ? 18 : 14);
+    }
+    if (dmg >= 8) this.fx.shake(Math.min(12, 2 + dmg * 0.45), 90);
     if (killed && e.alive) this.killEnemy(e, info, shatter);
-    else if (!killed) this.sfx('hit');
+    else if (!killed) this.sfx(dmg >= 8 ? 'hit-heavy' : 'hit');
   }
 
   private killEnemy(e: Enemy, info: HitInfo, shatter: boolean): void {
@@ -1445,10 +1706,17 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.fx.burst('ice', x, y);
       this.sfx('shatter');
       this.fx.floatText(x, y - 30, 'SHATTER!', '#bfeaff', 18);
+      // Frozen neighbours go too, one after another.
+      const near = this.enemies
+        .filter((o) => o !== e && o.alive && o.frozen && !o.boss && Math.hypot(o.x - x, o.y - y) < ENEMIES.shatterChainRadius)
+        .sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y));
+      near.forEach((o, i) => this.after(0.08 * (i + 1), () => o.alive && o.frozen && this.hitEnemy(o, 1, { source: 'shard' }), true));
     } else {
       this.fx.burst((e.def.deathFx as BurstStyle | undefined) ?? 'death', x, y);
       this.sfx('enemy-die');
     }
+    this.fx.ring(x, y, 0xffffff, e.radius * 2.4, 220, 4);
+    this.fx.hitStop(e.boss ? 140 : 40);
     const run = this.run;
     run.stats.kills++;
     if (!e.boss) {
@@ -1457,6 +1725,12 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     }
     runHook(this.sources(), 'onKill', this.ctx, e, info);
     e.def.onDeath?.(e.api);
+    if (e.mod === 'splitting' && !e.splitChild) {
+      for (const side of [-1, 1]) {
+        this.spawnEnemy(e.def.id, x + side * e.radius * 0.8, y, { splitChild: true, hpScale: (ENEMIES.elite.splitHpShare * e.maxHp) / e.def.hp, delay: 0.25 });
+      }
+    }
+    if (e.mod === 'explosive') this.eliteExplosion(x, y);
     this.enemies = this.enemies.filter((o) => o !== e);
     const wasBoss = e === this.bossEnemy;
     e.remove();
@@ -1473,7 +1747,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     ring.setScale(0.2);
     this.tweens.add({ targets: ring, scale: 1, alpha: 0, duration: 380, onComplete: () => ring.destroy() });
     for (const e of [...this.enemies]) {
-      if (!e.alive || e.passive) continue;
+      if (!this.isTarget(e)) continue;
       const d = Math.hypot(e.x - spec.x, e.y - spec.y);
       if (d > spec.radius + e.radius) continue;
       this.hitEnemy(e, spec.damage, { source: 'explosion', tag: spec.tag, angle: Math.atan2(e.y - spec.y, e.x - spec.x) });
@@ -1495,6 +1769,134 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     }
   }
 
+  /** An explosive elite's parting gift: a telegraphed blast where it died. */
+  private eliteExplosion(x: number, y: number): void {
+    const r = ENEMIES.elite.explosionRadius;
+    const tele = this.telegraphs.add({ kind: 'circle', x, y, radius: r }, () => true);
+    const counter = { t: 0 };
+    this.tweens.add({ targets: counter, t: 1, duration: ENEMIES.elite.explosionDelay * 1000, onUpdate: () => tele.setProgress(counter.t) });
+    this.sfx('telegraph-big');
+    this.after(
+      ENEMIES.elite.explosionDelay,
+      () => {
+        tele.destroy();
+        this.fx.burst('fire', x, y, 16);
+        this.fx.ring(x, y, 0xff8a3d, r, 260, 6);
+        this.sfx('explosion');
+        this.fx.shake(8, 200);
+        const p = this.player;
+        if (Math.hypot(p.x - x, p.y - y) < r + p.radius) this.damagePlayer(1, 'an exploding elite');
+      },
+      true,
+    );
+  }
+
+  /** Stops the world (not tweens or bubbles) while Rick makes his entrance. */
+  private holdWorld(on: boolean): void {
+    this.worldHold = on;
+    if (on) {
+      this.physics.world.pause();
+      (this.player.sprite.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+    } else if (!this.fx.stopped) {
+      this.physics.world.resume();
+    }
+  }
+
+  /** Rick's beam sweeps across the room, hitting each enemy as it passes. */
+  private sweepBeam(from: Vec, gadget: GadgetDef, targets: Enemy[], done: () => void): void {
+    const live = targets.filter((e) => e.alive);
+    if (!live.length) {
+      done();
+      return;
+    }
+    const cx = live.reduce((a, e) => a + e.x, 0) / live.length;
+    const cy = live.reduce((a, e) => a + e.y, 0) / live.length;
+    const base = Math.atan2(cy - from.y, cx - from.x);
+    const rel = (e: Enemy) => Phaser.Math.Angle.Wrap(Math.atan2(e.y - from.y, e.x - from.x) - base);
+    const rels = live.map(rel);
+    const a0 = Math.min(...rels) - 0.3;
+    const a1 = Math.max(...rels) + 0.3;
+    const hit = new Set<Enemy>();
+    const color = gadget.color ?? 0xbfeaff;
+    const g = this.add.graphics().setDepth(5000);
+    const counter = { t: 0 };
+    const len = 1700;
+    this.tweens.add({
+      targets: counter,
+      t: 1,
+      duration: 560,
+      ease: 'Sine.easeInOut',
+      onUpdate: () => {
+        const cur = a0 + (a1 - a0) * counter.t;
+        const a = base + cur;
+        const ex = from.x + Math.cos(a) * len;
+        const ey = from.y + Math.sin(a) * len;
+        g.clear();
+        g.lineStyle(22, color, 0.22);
+        g.lineBetween(from.x, from.y, ex, ey);
+        g.lineStyle(8, color, 0.95);
+        g.lineBetween(from.x, from.y, ex, ey);
+        g.lineStyle(3, 0xffffff, 1);
+        g.lineBetween(from.x, from.y, ex, ey);
+        for (const e of live) {
+          if (hit.has(e) || !e.alive || rel(e) > cur) continue;
+          hit.add(e);
+          gadget.hit?.(this.ctx, e);
+          this.fx.burst('ice', e.x, e.y, 6);
+        }
+      },
+      onComplete: () => {
+        for (const e of live) if (!hit.has(e) && e.alive) gadget.hit?.(this.ctx, e);
+        this.tweens.add({ targets: g, alpha: 0, duration: 220, onComplete: () => g.destroy() });
+        done();
+      },
+    });
+  }
+
+  /** Nudges the camera; it springs back over a few frames. Off with screen shake. */
+  private kickCamera(angle: number, px: number): void {
+    if (!this.settings().screenShake) return;
+    this.camKick.x = Phaser.Math.Clamp(this.camKick.x + Math.cos(angle) * px, -6, 6);
+    this.camKick.y = Phaser.Math.Clamp(this.camKick.y + Math.sin(angle) * px, -6, 6);
+  }
+
+  private applyCameraKick(realDt: number): void {
+    const cam = this.cameras.main;
+    const k = Math.exp(-realDt * 22);
+    this.camKick.x *= k;
+    this.camKick.y *= k;
+    if (this.camRest) cam.setScroll(this.camRest.x + this.camKick.x, this.camRest.y + this.camKick.y);
+    else cam.setFollowOffset(-this.camKick.x, -this.camKick.y);
+  }
+
+  /** Dashed through an attack at the last moment: slow-mo, a flourish and some Rick Meter. */
+  private perfectDodge(): void {
+    const p = this.player;
+    p.perfectUsed = true;
+    this.slowMo(PLAYER.perfectDodgeSlowMo.factor, PLAYER.perfectDodgeSlowMo.seconds);
+    this.run.rickMeter = Math.min(RICK_METER.max, this.run.rickMeter + RICK_METER.perfectDodge);
+    this.fx.pop(p.x, p.y - 20, 'fx-star', 0x9fdcff, 1, 4, 380);
+    this.fx.ring(p.x, p.y - 10, 0x9fdcff, 70, 420, 4);
+    this.fx.floatText(p.x, p.y - 70, 'PERFECT!', '#9fdcff', 22);
+    this.sfx('perfect');
+    this.run.stats.perfectDodges++;
+  }
+
+  /** Slows the whole game to `factor` speed for `seconds` of real time. */
+  private slowMo(factor: number, seconds: number): void {
+    this.timeFactor = factor;
+    this.slowMoUntil = this.time.now + seconds * 1000;
+    this.physics.world.timeScale = 1 / factor;
+    this.tweens.timeScale = factor;
+  }
+
+  private updateSlowMo(now: number): void {
+    if (this.timeFactor === 1 || now < this.slowMoUntil) return;
+    this.timeFactor = 1;
+    this.physics.world.timeScale = 1;
+    this.tweens.timeScale = 1;
+  }
+
   private callRick(): void {
     const run = this.run;
     if (this.rickBusy || !this.roomView) return;
@@ -1502,7 +1904,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.sfx('ui-deny');
       return;
     }
-    const hostile = this.enemies.filter((e) => e.alive && !e.passive);
+    const hostile = this.enemies.filter((e) => this.isTarget(e));
     if (!hostile.length) {
       this.hud.toast("Rick won't show up with nothing to shoot.");
       this.sfx('ui-deny');
@@ -1514,6 +1916,10 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     run.rickMeter = 0;
     this.meterAnnounced = false;
     this.rickBusy = true;
+    // Time stops the moment Morty calls.
+    this.holdWorld(true);
+    this.fx.flash(gadget.color ?? 0xbfeaff, 110);
+    this.sfx('rick-call');
     const view = this.roomView;
     const p = this.player;
     const side = p.x > view.widthPx / 2 ? -1 : 1;
@@ -1524,7 +1930,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       const door = [...view.doors].sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
       start = door ? { x: door.x, y: door.y } : { x: side < 0 ? TILE : view.widthPx - TILE, y: target.y };
     }
-    const rick = this.add.image(start.x, start.y, 'rick').setDepth(target.y + 1).setOrigin(0.5, 0.85);
+    const rick = this.add.image(start.x, start.y, 'rick').setDepth(target.y + 1).setOrigin(0.5, 0.85).setFlipX(side < 0);
     this.actors.set('rick', () => ({ x: rick.x, y: rick.y - 64 }));
     let swirl: Phaser.GameObjects.Image | null = null;
     if (portal) {
@@ -1533,6 +1939,21 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       rick.setScale(0.2);
       this.sfx('portal');
     }
+    const leave = () => {
+      this.tweens.add({
+        targets: rick,
+        x: start.x,
+        y: start.y,
+        scale: portal ? 0.1 : 1,
+        duration: 300,
+        onComplete: () => {
+          rick.destroy();
+          swirl?.destroy();
+          this.actors.delete('rick');
+          this.rickBusy = false;
+        },
+      });
+    };
     this.tweens.add({
       targets: rick,
       x: target.x,
@@ -1541,30 +1962,15 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       duration: portal ? 220 : 360,
       ease: 'Quad.easeOut',
       onComplete: () => {
-        const beams = this.add.graphics().setDepth(5000);
-        beams.lineStyle(7, 0xbfeaff, 0.95);
-        for (const e of hostile) if (e.alive) beams.lineBetween(rick.x + side * 18, rick.y - 36, e.x, e.y);
-        beams.lineStyle(3, 0xffffff, 1);
-        for (const e of hostile) if (e.alive) beams.lineBetween(rick.x + side * 18, rick.y - 36, e.x, e.y);
-        this.tweens.add({ targets: beams, alpha: 0, duration: 420, onComplete: () => beams.destroy() });
-        gadget.activate(this.ctx);
         this.say('rick', run.play.pick(gadget.lines), 2.6);
-        this.time.delayedCall(800, () => this.sfx('burp'));
-        this.time.delayedCall(1500, () => {
-          this.tweens.add({
-            targets: rick,
-            x: start.x,
-            y: start.y,
-            scale: portal ? 0.1 : 1,
-            duration: 300,
-            onComplete: () => {
-              rick.destroy();
-              swirl?.destroy();
-              this.actors.delete('rick');
-              this.rickBusy = false;
-            },
-          });
-        });
+        gadget.activate(this.ctx);
+        this.time.delayedCall(320, () =>
+          this.sweepBeam({ x: rick.x + side * 18, y: rick.y - 36 }, gadget, hostile, () => {
+            this.holdWorld(false);
+            this.time.delayedCall(450, () => this.sfx('burp'));
+            this.time.delayedCall(1100, leave);
+          }),
+        );
       },
     });
   }
@@ -1882,7 +2288,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       actNumber: run.actIndex + 1,
       actCount: run.sequence.length,
       widgets: this.mechanics.map((m) => m.inst.hud?.() ?? null).filter((w): w is NonNullable<typeof w> => !!w),
-      boss: this.bossEnemy?.alive ? { title: this.bossEnemy.def.boss?.title ?? this.bossEnemy.def.name, hp: Math.max(0, this.bossEnemy.hp), maxHp: this.bossEnemy.maxHp } : null,
+      boss: this.bossEnemy?.alive
+        ? { title: this.bossEnemy.def.boss?.title ?? this.bossEnemy.def.name, hp: Math.max(0, this.bossEnemy.hp), maxHp: this.bossEnemy.maxHp, phases: this.bossEnemy.def.boss?.phases }
+        : null,
       objective: this.objectiveText,
       timer: this.hudTimer ? { ...this.hudTimer } : null,
       hint: this.hintText,

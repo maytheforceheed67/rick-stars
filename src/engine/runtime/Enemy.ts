@@ -10,6 +10,7 @@ import type { Rng } from '../rng';
 import type { Settings } from '../save/save';
 import type {
   Brain,
+  EliteMod,
   EnemyApi,
   EnemyDef,
   EnemySelf,
@@ -42,11 +43,28 @@ export interface EnemyHost {
   windupMult(): number;
   settings(): Settings;
   enemyShot(spec: EnemyShotSpec & { x: number; y: number }, sourceName: string): void;
-  spawnEnemy(id: string, x: number, y: number, opts?: { elite?: boolean; delay?: number }): Enemy | null;
+  spawnEnemy(id: string, x: number, y: number, opts?: SpawnOpts): Enemy | null;
+  /** Hostile enemies near a point (not hazards or calm NPCs). */
+  enemiesNear(x: number, y: number, radius: number): Enemy[];
   damagePlayer(halves: number, source: string): void;
+  /** Morty falls if he's within `radius` of (x, y) and nothing lets him stand there. */
+  pitfall(x: number, y: number, radius: number): void;
   sfx(id: string): void;
   shake(intensity: number, ms: number): void;
 }
+
+export interface SpawnOpts {
+  elite?: boolean;
+  passive?: boolean;
+  delay?: number;
+  /** Elite twist; picked at random when an elite spawns without one. */
+  mod?: EliteMod;
+  /** Half of a splitting elite: smaller, weaker, and it doesn't split again. */
+  splitChild?: boolean;
+  hpScale?: number;
+}
+
+const MOD_COLOR: Record<EliteMod, number> = { shielded: 0x7fdcff, hasty: 0xffb03a, splitting: 0xc58bff, explosive: 0xff5a3d };
 
 let nextUid = 1;
 
@@ -73,6 +91,17 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   slowMult = 1;
   slowLeft = 0;
   spawnLeft: number;
+  /** Elite twist, if any. */
+  readonly mod: EliteMod | null;
+  /** Hits a shielded elite's bubble still absorbs. */
+  shieldHits = 0;
+  /** Seconds left staggered (open to extra damage). */
+  staggerLeft = 0;
+  readonly splitChild: boolean;
+  /** Movement speed multiplier (hasty elites). */
+  readonly speedMult: number;
+  /** Seconds left of a support enemy's haste buff. */
+  hasteLeft = 0;
   /** Radius in world pixels (scaled for elites). */
   readonly radius: number;
 
@@ -81,6 +110,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   private waitUntil: (() => boolean) | null = null;
   private windupAmt = 0;
   private flashLeft = 0;
+  /** Squash-and-stretch after a hit, 1 = just hit. */
+  private flinch = 0;
   private facing = 0;
   private readonly baseScale: number;
   private readonly flying: boolean;
@@ -89,6 +120,9 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   private plate?: Phaser.GameObjects.Text;
   private plateText: string | null = null;
   private aura?: Phaser.GameObjects.Ellipse;
+  private modIcon?: Phaser.GameObjects.Image;
+  private bubble?: Phaser.GameObjects.Arc;
+  private dizzy: Phaser.GameObjects.Image[] = [];
 
   constructor(
     private readonly host: EnemyHost,
@@ -96,15 +130,18 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     def: EnemyDef,
     x: number,
     y: number,
-    opts: { elite?: boolean; passive?: boolean; delay?: number } = {},
+    opts: SpawnOpts = {},
   ) {
     super(scene, x, y, def.art.key);
     this.def = def;
     this.elite = !!opts.elite && !!def.elite;
     this.passive = !!opts.passive;
-    this.maxHp = def.hp * (this.elite ? (def.elite?.hpMult ?? 1.6) : 1);
+    this.mod = this.elite ? (opts.mod ?? null) : null;
+    this.splitChild = !!opts.splitChild;
+    this.speedMult = this.mod === 'hasty' ? ENEMIES.elite.hasteMult : 1;
+    this.maxHp = Math.max(1, def.hp * (this.elite ? (def.elite?.hpMult ?? 1.6) : 1) * (opts.hpScale ?? 1));
     this.hp = this.maxHp;
-    this.baseScale = this.elite ? (def.elite?.scale ?? 1.25) : 1;
+    this.baseScale = this.elite ? (def.elite?.scale ?? 1.25) : this.splitChild ? 0.8 : 1;
     this.radius = def.radius * this.baseScale;
     this.flying = !!def.flying;
     this.spawnLeft = opts.delay ?? ENEMIES.spawnDelay;
@@ -124,9 +161,16 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
       this.shadow = scene.add.ellipse(x, y + this.radius + 10, this.radius * 1.6, this.radius * 0.5, 0x000000, 0.25).setDepth(-400);
     }
     if (this.elite) {
-      this.aura = scene.add.ellipse(x, y, this.radius * 3, this.radius * 1.2, 0xffd54a, 0.28).setDepth(-450);
-      this.aura.setStrokeStyle(3, 0xffd54a, 0.9);
+      const color = this.mod ? MOD_COLOR[this.mod] : 0xffd54a;
+      this.aura = scene.add.ellipse(x, y, this.radius * 3, this.radius * 1.2, color, 0.28).setDepth(-450);
+      this.aura.setStrokeStyle(3, color, 0.9);
+      if (this.mod) this.modIcon = scene.add.image(x, y, `elite-${this.mod}`).setDepth(5150);
+      if (this.mod === 'shielded') {
+        this.shieldHits = ENEMIES.elite.shieldHits;
+        this.bubble = scene.add.circle(x, y, this.radius * 1.6, 0x7fdcff, 0.14).setStrokeStyle(3, 0xbfeeff, 0.9).setDepth(5140);
+      }
     }
+    if (def.hazard) this.invulnerable = true;
     this.setAlpha(0.2);
     this.api = makeApi(this, host);
     this.brain = def.brain(this.api);
@@ -189,6 +233,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     else this.plate.setText(text);
   }
 
+  setArt(key: string): void {
+    if (this.scene.textures.exists(key)) this.setTexture(key);
+  }
+
   teleport(x: number, y: number): void {
     this.setPosition(x, y);
     (this.body as Phaser.Physics.Arcade.Body).reset(x, y);
@@ -240,8 +288,43 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     this.slowLeft = Math.max(this.slowLeft, seconds);
   }
 
+  heal(amount: number): void {
+    if (!this.alive || amount <= 0 || this.hp >= this.maxHp) return;
+    this.hp = Math.min(this.maxHp, this.hp + amount);
+    this.host.fx.burst('heal', this.x, this.y - this.displayHeight * 0.5, 5);
+  }
+
+  haste(seconds: number): void {
+    this.hasteLeft = Math.max(this.hasteLeft, seconds);
+  }
+
+  grantShield(hits: number): void {
+    if (!this.alive) return;
+    this.shieldHits = Math.max(this.shieldHits, hits);
+    if (!this.bubble) this.bubble = this.scene.add.circle(this.x, this.y, this.radius * 1.6, 0x7fdcff, 0.14).setStrokeStyle(3, 0xbfeeff, 0.9).setDepth(5140);
+  }
+
+  /** The shield bubble soaked a hit; returns true when that popped it. */
+  absorbHit(): boolean {
+    this.shieldHits = Math.max(0, this.shieldHits - 1);
+    if (this.shieldHits > 0) {
+      this.bubble?.setScale(1.12);
+      return false;
+    }
+    this.bubble?.destroy();
+    this.bubble = undefined;
+    return true;
+  }
+
+  breakShield(): void {
+    this.shieldHits = 0;
+    this.bubble?.destroy();
+    this.bubble = undefined;
+  }
+
   flashHit(): void {
     this.flashLeft = 0.08;
+    this.flinch = 1;
     if (this.host.settings().reducedFlash) this.setTint(0xffc0c0);
     else this.setTintFill(0xffffff);
   }
@@ -296,6 +379,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
       if (this.slowLeft <= 0) this.slowMult = 1;
     }
 
+    if (this.staggerLeft > 0) this.staggerLeft = Math.max(0, this.staggerLeft - dt);
+    if (this.hasteLeft > 0) this.hasteLeft = Math.max(0, this.hasteLeft - dt);
     if (this.frozenLeft > 0) {
       this.frozenLeft -= dt;
       if (this.frozenLeft <= 0) this.unfreeze();
@@ -340,7 +425,14 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   }
 
   private syncVisuals(time: number): void {
-    this.setDepth(this.y);
+    this.setDepth(this.def.hazard?.flat ? -350 : this.y);
+    if (this.flinch > 0) {
+      this.flinch = Math.max(0, this.flinch - this.host.frameDt() * 9);
+      const f = this.flinch * (this.boss ? 0.35 : 1);
+      this.setScale(this.baseScale * (1 + 0.16 * f), this.baseScale * (1 - 0.13 * f));
+    } else if (this.scaleX !== this.baseScale || this.scaleY !== this.baseScale) {
+      this.setScale(this.baseScale);
+    }
     const p = this.host.player;
     const lookAngle = this.windupAmt > 0 || this.facing ? this.facing || Math.atan2(p.y - this.y, p.x - this.x) : Math.atan2(p.y - this.y, p.x - this.x);
     this.setFlipX(Math.cos(lookAngle) < 0);
@@ -355,11 +447,34 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     if (this.flying) {
       this.shadow?.setPosition(this.x, this.y + this.radius + 10).setScale(1 + Math.sin(time * 4 + this.uid) * 0.1);
     }
-    this.aura?.setPosition(this.x, this.y + this.radius * 0.6).setAlpha(0.6 + 0.3 * Math.sin(time * 5));
+    this.aura?.setPosition(this.x, this.y + this.radius * 0.6).setAlpha(0.6 + 0.3 * Math.sin(time * (this.mod === 'explosive' ? 11 : 5)));
+    const top = this.y - this.displayHeight * this.originY;
+    this.modIcon?.setPosition(this.x + this.displayWidth * 0.42, top + 2);
+    if (this.bubble) {
+      this.bubble.setPosition(this.x, this.y - this.displayHeight * (this.originY - 0.5));
+      if (this.bubble.scale > 1) this.bubble.setScale(Math.max(1, this.bubble.scale - this.host.frameDt() * 2));
+    }
+    const fast = this.mod === 'hasty' || this.hasteLeft > 0;
+    if (fast && Math.abs(this.moveVx) + Math.abs(this.moveVy) > 20 && Math.sin(time * 30 + this.uid) > 0.6) this.speedGhost();
+    if (this.staggerLeft > 0) {
+      if (!this.dizzy.length) this.dizzy = [0, 1, 2].map(() => this.scene.add.image(this.x, top, 'fx-star').setTint(0xffe27a).setDepth(5160));
+      this.dizzy.forEach((d, i) => {
+        const a = time * 6 + (i * Math.PI * 2) / 3;
+        d.setPosition(this.x + Math.cos(a) * this.radius * 1.1, top - 6 + Math.sin(a) * 5);
+      });
+    } else if (this.dizzy.length) {
+      this.dizzy.forEach((d) => d.destroy());
+      this.dizzy = [];
+    }
     if (this.ice) this.ice.setPosition(this.x, this.y - this.displayHeight * (this.originY - 0.5)).setDepth(this.depth + 1);
     const plate = this.def.nameplate?.(this.host.ctx) ?? null;
     this.setNameplate(plate);
     this.plate?.setPosition(this.x, this.y - this.displayHeight * this.originY - 4);
+  }
+
+  private speedGhost(): void {
+    const g = this.scene.add.image(this.x, this.y, this.texture.key).setOrigin(this.originX, this.originY).setFlipX(this.flipX).setScale(this.scaleX, this.scaleY).setDepth(this.depth - 1).setAlpha(0.35).setTint(0xffb03a);
+    this.scene.tweens.add({ targets: g, alpha: 0, duration: 200, onComplete: () => g.destroy() });
   }
 
   /** Removes the enemy from the world (after the host has run death effects). */
@@ -370,12 +485,18 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     this.ice?.destroy();
     this.plate?.destroy();
     this.aura?.destroy();
+    this.modIcon?.destroy();
+    this.bubble?.destroy();
+    this.dizzy.forEach((d) => d.destroy());
+    this.dizzy = [];
     this.destroy();
   }
 }
 
 function makeApi(e: Enemy, host: EnemyHost): EnemyApi {
-  const speed = () => e.def.speed;
+  const speed = () => e.def.speed * e.speedMult * (e.hasteLeft > 0 ? ENEMIES.hasteBuff : 1);
+  // One follow target per enemy, so a new line replaces its previous speech bubble.
+  const head = () => (e.alive ? { x: e.x, y: e.y - e.displayHeight * e.originY } : null);
   const toward = (x: number, y: number, mult: number) => {
     const dx = x - e.x;
     const dy = y - e.y;
@@ -475,13 +596,38 @@ function makeApi(e: Enemy, host: EnemyHost): EnemyApi {
     hazard: (spec: HazardSpec) => host.hazards.add(spec),
     spawn: (id, x, y, opts) => host.spawnEnemy(id, x, y, { elite: opts?.elite, delay: 0.4 }),
     say(text, seconds = 2.2) {
-      host.fx.bubble({ x: e.x, y: e.y - e.displayHeight * e.originY }, text, 0xff8a3d, seconds, () =>
-        e.alive ? { x: e.x, y: e.y - e.displayHeight * e.originY } : null,
-      );
+      host.fx.bubble({ x: e.x, y: e.y - e.displayHeight * e.originY }, text, 0xff8a3d, seconds, head);
     },
     sfx: (id) => host.sfx(id),
     shake: (i, ms) => host.shake(i, ms),
     room: () => host.roomInfo(),
+    pitfall: (radius) => host.pitfall(e.x, e.y, radius),
+    allies: (radius) => host.enemiesNear(e.x, e.y, radius).filter((o) => o !== e),
+    flank(mult = 1) {
+      const p = host.player;
+      const d = Math.hypot(p.x - e.x, p.y - e.y);
+      if (d < 150) {
+        api.chase(mult);
+        return;
+      }
+      // Swing wide: aim at a point beside the player, on this enemy's side.
+      const a = Math.atan2(p.y - e.y, p.x - e.x);
+      const side = e.uid % 2 === 0 ? 1 : -1;
+      const off = Math.min(140, d * 0.45);
+      const tx = p.x + Math.cos(a + (Math.PI / 2) * side) * off;
+      const ty = p.y + Math.sin(a + (Math.PI / 2) * side) * off;
+      if (host.room().walkableLine(e.x, e.y, tx, ty, !!e.def.flying, e.radius)) toward(tx, ty, mult);
+      else api.chase(mult);
+    },
+    *stagger(seconds: number): Brain {
+      e.setVelocityRaw(0, 0);
+      e.staggerLeft = Math.max(e.staggerLeft, seconds);
+      host.sfx('stagger');
+      while (e.staggerLeft > 0) {
+        e.setVelocityRaw(0, 0);
+        yield;
+      }
+    },
   };
   return api;
 }

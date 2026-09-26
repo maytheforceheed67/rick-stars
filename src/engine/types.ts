@@ -326,7 +326,9 @@ export type TelegraphSpec =
   | { kind: 'circle'; x: number; y: number; radius: number }
   | { kind: 'arc'; x: number; y: number; radius: number; angle: number; spread: number }
   | { kind: 'line'; x: number; y: number; angle: number; length: number; width: number }
-  | { kind: 'ring'; x: number; y: number; radius: number; thickness: number };
+  | { kind: 'ring'; x: number; y: number; radius: number; thickness: number }
+  /** Where an enemy is about to appear (not an attack). */
+  | { kind: 'spawn'; x: number; y: number; radius: number };
 
 /** Built-in enemy shot looks. Content can add a kind by registering a sprite keyed `shot-<kind>`. */
 export type ShotKind = 'orb' | 'paper' | 'ball' | 'book' | 'spore' | 'bolt' | 'stamp' | 'ice' | (string & {});
@@ -355,7 +357,11 @@ export type MeleeSpec =
 
 export type HazardSpec =
   | { kind: 'shockwave'; x: number; y: number; speed: number; maxRadius: number; thickness: number; damage: number; label?: string }
-  | { kind: 'laser'; x1: number; y1: number; x2: number; y2: number; width: number; warn: number; active: number; damage: number };
+  | { kind: 'laser'; x1: number; y1: number; x2: number; y2: number; width: number; warn: number; active: number; damage: number }
+  /** A lingering puddle: hurts and/or applies a status while Morty stands in it. */
+  | { kind: 'pool'; x: number; y: number; radius: number; seconds: number; damage?: number; status?: ContentId; color?: number }
+  /** A beam from (x, y) rotating from angle `from` to `to` over `seconds`. */
+  | { kind: 'sweep'; x: number; y: number; from: number; to: number; length: number; width: number; seconds: number; damage: number };
 
 export interface EnemySelf extends EnemyRef {
   readonly vx: number;
@@ -373,6 +379,16 @@ export interface EnemySelf extends EnemyRef {
   setFacing(angle: number): void;
   setAlpha(alpha: number): void;
   setNameplate(text: string | null): void;
+  /** Swaps the sprite (a locker bursting open, a ledge crumbling away). */
+  setArt(key: string): void;
+  readonly hp: number;
+  readonly maxHp: number;
+  /** Heals up to max HP (support enemies). */
+  heal(amount: number): void;
+  /** Moves faster for a while (buffed by a support enemy). */
+  haste(seconds: number): void;
+  /** Gives a bubble that soaks the next `hits` hits. */
+  grantShield(hits: number): void;
   teleport(x: number, y: number): void;
   /** Dies normally (drops, death effects, hooks). */
   kill(): void;
@@ -414,7 +430,21 @@ export interface EnemyApi {
   sfx(id: string): void;
   shake(intensity: number, ms: number): void;
   room(): RoomInfo;
+  /**
+   * Leaves the enemy open after a big attack: it stops, shows dizzy stars and takes extra damage
+   * (ENEMIES.staggerMult) for `seconds`. Use with yield*.
+   */
+  stagger(seconds: number): Brain;
+  /** Other hostile enemies within `radius` (not hazards or calm NPCs). */
+  allies(radius: number): EnemySelf[];
+  /** Approaches the player from the side, the way rushers flank. */
+  flank(speedMult?: number): void;
+  /** Drops the floor within `radius` of this spot: Morty falls unless a mechanic lets him stand there. */
+  pitfall(radius: number): void;
 }
+
+/** Visible twists an elite enemy spawns with, on top of its extra HP. */
+export type EliteMod = 'shielded' | 'hasty' | 'splitting' | 'explosive';
 
 export interface EnemyDef extends ContentMeta {
   name: string;
@@ -433,13 +463,22 @@ export interface EnemyDef extends ContentMeta {
   /** Front-facing shield: shots within this arc (degrees) of the facing direction are blocked. */
   shieldArc?: number;
   knockbackResist?: number;
-  elite?: { hpMult: number; scale?: number; params?: Record<string, number> };
+  elite?: { hpMult: number; scale?: number; params?: Record<string, number>; mods?: EliteMod[] };
   onDeath?(api: EnemyApi): void;
   /** Particle style when it dies ('death', 'paper', 'slime', 'spark', ...). */
   deathFx?: string;
   /** Nameplate text shown above the enemy (e.g. Rick insisting they're robots). */
   nameplate?(ctx: GameCtx): string | null;
   boss?: BossInfo;
+  /**
+   * Makes this a room hazard (a bursting locker, a scanner): it can't be hurt or targeted,
+   * doesn't count toward clearing the room, and goes quiet once the room is cleared.
+   */
+  hazard?: {
+    placement: 'wall' | 'floor' | 'cliff-edge';
+    /** Lies flat on the floor (puddles, cracks): always drawn under characters. */
+    flat?: boolean;
+  };
 }
 
 export interface BossInfo {
@@ -451,6 +490,8 @@ export interface BossInfo {
   /** Hook run when the boss is beaten (e.g. leave a frozen statue behind). */
   onDefeat?(api: RoomScriptApi, at: Vec): void;
   music?: string;
+  /** HP fractions where the fight changes phase (drawn as ticks on the boss bar). */
+  phases?: number[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -672,8 +713,12 @@ export interface MechanicDef extends ContentMeta {
 
 export interface GadgetDef extends ContentMeta {
   name: string;
-  /** Called when Rick arrives. */
+  /** Called when Rick arrives, before his beam sweeps the room. */
   activate(ctx: GameCtx): void;
+  /** Called for each enemy as the beam sweeps over it. */
+  hit?(ctx: GameCtx, enemy: EnemyRef): void;
+  /** Beam color. */
+  color?: number;
   /** Rude things Rick says while using it. */
   lines: string[];
 }
@@ -740,6 +785,12 @@ export interface ActDef {
   enemyPool: Weighted[];
   itemPool: Weighted[];
   eliteChance: number;
+  /** Chance a combat room is an ambush: it looks empty until Morty walks in, then the doors slam. */
+  ambushChance?: number;
+  /** Hazard enemies (EnemyDef.hazard) placed in some combat rooms. */
+  hazards?: Weighted[];
+  /** Chance a combat room gets one or two hazards. */
+  hazardChance?: number;
   shop?: ShopDef;
   specialRoom?: ContentId;
   finale: FinaleStage[];

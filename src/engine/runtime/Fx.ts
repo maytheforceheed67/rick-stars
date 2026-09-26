@@ -72,6 +72,18 @@ export class Fx {
     this.emitters.get(style)?.explode(count ?? STYLES[style].count, x, y);
   }
 
+  /** A quick additive flash that grows and fades: muzzle flashes, impacts, perfect dodges. */
+  pop(x: number, y: number, texture: string, color: number, from: number, to: number, ms: number, angle = 0): void {
+    const img = this.scene.add.image(x, y, texture).setDepth(4600).setBlendMode(Phaser.BlendModes.ADD).setTint(color).setScale(from).setRotation(angle);
+    this.scene.tweens.add({ targets: img, scale: to, alpha: 0, duration: ms, ease: 'Cubic.easeOut', onComplete: () => img.destroy() });
+  }
+
+  /** An expanding ring: impacts, kills, spawn warnings. */
+  ring(x: number, y: number, color: number, radius: number, ms: number, width = 3): void {
+    const c = this.scene.add.circle(x, y, radius, color, 0).setStrokeStyle(width, color, 0.9).setDepth(4600).setScale(0.25);
+    this.scene.tweens.add({ targets: c, scale: 1, alpha: 0, duration: ms, ease: 'Cubic.easeOut', onComplete: () => c.destroy() });
+  }
+
   floatText(x: number, y: number, text: string, color = '#ffffff', size = 20): void {
     const t = this.scene.add
       .text(x, y, text, { fontFamily: FONT, fontSize: `${size}px`, fontStyle: 'bold', color, stroke: '#1a1424', strokeThickness: 5 })

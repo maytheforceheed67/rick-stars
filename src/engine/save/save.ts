@@ -4,7 +4,7 @@
  */
 
 export const SAVE_KEY = 'rick-stars.save';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export type TextSpeed = 'slow' | 'normal' | 'fast';
 
@@ -14,6 +14,8 @@ export interface Settings {
   screenShake: boolean;
   reducedFlash: boolean;
   textSpeed: TextSpeed;
+  /** Floating damage numbers on hits (off by default). */
+  damageNumbers: boolean;
 }
 
 export interface EpisodeRecord {
@@ -61,7 +63,7 @@ export interface SaveStorage {
 export type LoadStatus = 'new' | 'loaded' | 'migrated' | 'reset';
 
 export function defaultSettings(): Settings {
-  return { musicVolume: 0.5, sfxVolume: 0.8, screenShake: true, reducedFlash: false, textSpeed: 'normal' };
+  return { musicVolume: 0.5, sfxVolume: 0.8, screenShake: true, reducedFlash: false, textSpeed: 'normal', damageNumbers: false };
 }
 
 export function defaultSave(): SaveData {
@@ -102,6 +104,8 @@ const migrations: Record<number, Migration> = {
       lifetime: { runs: 0, deaths: 0, kills: 0, scrapEarned: 0 },
     };
   },
+  // Version 3 adds the damage-numbers setting (off).
+  2: (raw) => ({ ...raw, version: 3, settings: { ...((raw.settings as object | undefined) ?? {}), damageNumbers: false } }),
 };
 
 /** Runs migrations up to the current version and fills in anything missing. */
@@ -150,6 +154,7 @@ function sanitize(data: Record<string, unknown>): SaveData {
       screenShake: typeof s.screenShake === 'boolean' ? s.screenShake : d.settings.screenShake,
       reducedFlash: typeof s.reducedFlash === 'boolean' ? s.reducedFlash : d.settings.reducedFlash,
       textSpeed: s.textSpeed === 'slow' || s.textSpeed === 'fast' ? s.textSpeed : 'normal',
+      damageNumbers: typeof s.damageNumbers === 'boolean' ? s.damageNumbers : d.settings.damageNumbers,
     },
     shirt: typeof data.shirt === 'string' ? data.shirt : null,
     lifetime: {

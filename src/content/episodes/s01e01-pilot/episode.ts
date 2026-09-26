@@ -10,6 +10,7 @@ import { PILOT_CHARACTERS } from './characters';
 import { PILOT_CUTSCENES } from './cutscenes';
 import { PILOT_ENCOUNTERS, PILOT_SCRIPTS } from './encounters';
 import { PILOT_ENEMIES } from './enemies';
+import { PILOT_HAZARD_ART, PILOT_HAZARDS, slimed } from './hazards';
 import { PILOT_ITEMS, PILOT_SYNERGIES } from './items';
 import { grapplingShoes } from './mechanics/grapplingShoes';
 import { suspicion } from './mechanics/suspicion';
@@ -49,8 +50,8 @@ export const pilot: EpisodeDef = {
     characters: PILOT_CHARACTERS,
     items: PILOT_ITEMS,
     synergies: PILOT_SYNERGIES,
-    statuses: PILOT_STATUSES,
-    enemies: [...PILOT_ENEMIES, ...PILOT_BOSSES],
+    statuses: [...PILOT_STATUSES, slimed],
+    enemies: [...PILOT_ENEMIES, ...PILOT_BOSSES, ...PILOT_HAZARDS],
     encounters: PILOT_ENCOUNTERS,
     specialRooms: PILOT_SPECIAL_ROOMS,
     mechanics: [grapplingShoes, suspicion],
@@ -60,7 +61,7 @@ export const pilot: EpisodeDef = {
     backdrops: PILOT_BACKDROPS,
     templates: PILOT_TEMPLATES,
     scripts: PILOT_SCRIPTS,
-    sprites: PILOT_PROP_ART,
+    sprites: [...PILOT_PROP_ART, ...PILOT_HAZARD_ART],
     music: PILOT_MUSIC,
   },
 };

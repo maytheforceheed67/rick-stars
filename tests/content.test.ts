@@ -40,6 +40,7 @@ describe('content registry', () => {
   it('keeps regular enemies within 8-15 HP and bosses within 180-300 HP', () => {
     expect(reg.enemies.size).toBeGreaterThan(10);
     for (const e of reg.enemies.values()) {
+      if (e.hazard) continue;
       const [lo, hi] = e.boss ? ENEMIES.bossHp : ENEMIES.regularHp;
       expect(e.hp, e.id).toBeGreaterThanOrEqual(lo);
       expect(e.hp, e.id).toBeLessThanOrEqual(hi);

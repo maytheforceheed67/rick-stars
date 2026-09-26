@@ -20,16 +20,17 @@ const orb = (key: string, fill: number, core: number): SpriteArt => ({
 
 export const ENGINE_SPRITES: SpriteArt[] = [
   {
+    // An elongated energy bolt (tinted by the weapon), so it never reads like an enemy orb.
     key: 'shot-player',
-    width: 16,
-    height: 16,
+    width: 24,
+    height: 14,
     draw: (g) => {
       g.fillStyle(0xffffff, 0.35);
-      g.fillCircle(8, 8, 8);
+      g.fillEllipse(12, 7, 24, 14);
       g.fillStyle(0xffffff, 1);
-      g.fillCircle(8, 8, 5.5);
-      g.lineStyle(2, 0x1a1424, 0.8);
-      g.strokeCircle(8, 8, 5.5);
+      g.fillEllipse(13, 7, 18, 8);
+      g.lineStyle(2, 0x1a1424, 0.7);
+      g.strokeEllipse(13, 7, 18, 8);
     },
   },
   orb('shot-orb', 0xff6a3d, 0xffe0a8),
@@ -120,6 +121,37 @@ export const ENGINE_SPRITES: SpriteArt[] = [
     },
   },
   { key: 'fx-dot', width: 8, height: 8, draw: (g) => dot(g, 4, 4, 4, 0xffffff) },
+  {
+    key: 'elite-shielded',
+    width: 16,
+    height: 18,
+    draw: (g) => wonkyPoly(g, [[8, 1], [15, 4], [14, 11], [8, 17], [2, 11], [1, 4]], { fill: 0x7fdcff, seed: 81, lineWidth: 2, wobble: 0.3 }),
+  },
+  {
+    key: 'elite-hasty',
+    width: 14,
+    height: 18,
+    draw: (g) => wonkyPoly(g, [[9, 0], [2, 10], [7, 10], [4, 18], [13, 7], [8, 7]], { fill: 0xffb03a, seed: 82, lineWidth: 2, wobble: 0.3 }),
+  },
+  {
+    key: 'elite-splitting',
+    width: 18,
+    height: 16,
+    draw: (g) => {
+      blob(g, 5.5, 8, 4.5, 6, { fill: 0xc58bff, seed: 83, lineWidth: 2 });
+      blob(g, 12.5, 8, 4.5, 6, { fill: 0xc58bff, seed: 84, lineWidth: 2 });
+    },
+  },
+  {
+    key: 'elite-explosive',
+    width: 18,
+    height: 18,
+    draw: (g) => {
+      blob(g, 8, 11, 6.5, 6.5, { fill: 0x2b2438, seed: 85, lineWidth: 2 });
+      stroke(g, [[11, 6], [14, 2]], INK, 2);
+      dot(g, 15, 2, 2.2, 0xff6a3d);
+    },
+  },
   {
     key: 'fx-square',
     width: 7,

@@ -45,6 +45,27 @@ describe('save data', () => {
     expect(data.settings).toMatchObject({ musicVolume: 0.3, sfxVolume: 0.3, screenShake: false, reducedFlash: false, textSpeed: 'normal' });
   });
 
+  it('migrates a v2 save, keeping everything and adding the new settings', () => {
+    const v2 = {
+      version: 2,
+      bankedScrap: 12,
+      upgrades: { 'spare-heart': 1 },
+      unlocked: ['mega-seed'],
+      episodes: { S01E01: { attempts: 2, clears: 1, bestTimeMs: 900000 } },
+      seenCutscenes: ['pilot-wake-up'],
+      settings: { musicVolume: 0.4, sfxVolume: 0.6, screenShake: false, reducedFlash: true, textSpeed: 'fast' },
+      shirt: 'shirt-portal',
+      lifetime: { runs: 3, deaths: 2, kills: 40, scrapEarned: 80 },
+    };
+    const store = new MemoryStorage();
+    store.setItem(SAVE_KEY, JSON.stringify(v2));
+    const { data, status } = loadSave(store, ctx);
+    expect(status).toBe('migrated');
+    expect(data.version).toBe(SAVE_VERSION);
+    expect(data).toMatchObject({ bankedScrap: 12, upgrades: { 'spare-heart': 1 }, unlocked: ['mega-seed'], shirt: 'shirt-portal' });
+    expect(data.settings).toEqual({ musicVolume: 0.4, sfxVolume: 0.6, screenShake: false, reducedFlash: true, textSpeed: 'fast', damageNumbers: false });
+  });
+
   it('backs up and resets unreadable or future saves', () => {
     for (const raw of ['{not json', JSON.stringify({ version: 99 }), JSON.stringify({ version: 0 })]) {
       const store = new MemoryStorage();

@@ -72,16 +72,29 @@ export const LINES = {
   },
   frank: {
     intro: 'Hey, Smith! Did you just call me poor?!',
+    phase2: "Oh, you think you're funny? Everybody watch this!",
     enraged: "That's it! You're DEAD, Smith!",
     lockers: ['Locker check!', 'Hit the books, Smith!', "Here's your homework!"],
   },
   supervisor: {
     intro: 'This line is CLOSED. Permanently.',
     phase2: 'Code Red! Red tape! ALL of it!',
+    phase3: 'FINAL NOTICE. Your application is REJECTED.',
+    finalNotice: 'Stamp! Stamp! STAMP!',
+    stuck: 'Ugh. Stamp is stuck. Nobody look.',
     summon: 'Security!',
   },
   hallMonitor: {
     whistle: 'TWEEEET!',
+  },
+  pepSquad: {
+    cheer: ['Go, team, go!', 'Give me a W! For wedgie!', 'Spirit fingers!'],
+  },
+  notary: {
+    approved: 'APPROVED.',
+  },
+  dispatcher: {
+    backup: ['Backup to checkpoint four!', 'Code nine! Send everyone!', 'I need a clerk! Any clerk!'],
   },
   fruitSnatcher: {
     grabFruit: 'Mine!',

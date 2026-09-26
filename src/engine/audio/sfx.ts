@@ -27,7 +27,36 @@ export const SFX: Record<string, SfxRecipe> = {
     { wave: 'sawtooth', freq: 520, freqEnd: 160, duration: 0.14, volume: 0.2, filter: { type: 'lowpass', freq: 2400 } },
     { wave: 'noise', freq: 2000, duration: 0.06, volume: 0.12 },
   ],
-  hit: [{ wave: 'square', freq: 300, freqEnd: 120, duration: 0.07, volume: 0.2 }],
+  // A thud, clearly different from the zap of firing.
+  hit: [
+    { wave: 'noise', freq: 900, duration: 0.06, volume: 0.22, filter: { type: 'lowpass', freq: 1500, freqEnd: 350 } },
+    { wave: 'sine', freq: 190, freqEnd: 85, duration: 0.08, volume: 0.24 },
+  ],
+  'hit-heavy': [
+    { wave: 'noise', freq: 700, duration: 0.12, volume: 0.28, filter: { type: 'lowpass', freq: 1100, freqEnd: 200 } },
+    { wave: 'sine', freq: 150, freqEnd: 55, duration: 0.16, volume: 0.3 },
+  ],
+  stagger: [
+    { wave: 'triangle', freq: 900, freqEnd: 500, duration: 0.25, volume: 0.12, vibrato: { rate: 14, depth: 80 } },
+    { wave: 'triangle', freq: 700, freqEnd: 380, duration: 0.3, volume: 0.1, delay: 0.12 },
+  ],
+  'shield-pop': [
+    { wave: 'noise', freq: 4000, duration: 0.18, volume: 0.18, filter: { type: 'highpass', freq: 2500 } },
+    { wave: 'triangle', freq: 1400, freqEnd: 500, duration: 0.2, volume: 0.12 },
+  ],
+  'rick-call': [
+    { wave: 'sine', freq: 220, freqEnd: 1760, duration: 0.35, volume: 0.14 },
+    { wave: 'noise', freq: 3000, duration: 0.3, volume: 0.1, filter: { type: 'bandpass', freq: 1500, freqEnd: 5000, q: 2 } },
+  ],
+  crumble: [
+    { wave: 'noise', freq: 500, duration: 0.45, volume: 0.24, filter: { type: 'lowpass', freq: 900, freqEnd: 150 } },
+    { wave: 'sine', freq: 110, freqEnd: 45, duration: 0.4, volume: 0.2 },
+  ],
+  bubble: [{ wave: 'sine', freq: 300, freqEnd: 700, duration: 0.12, volume: 0.12 }],
+  perfect: [
+    { wave: 'triangle', freq: 1200, freqEnd: 2400, duration: 0.18, volume: 0.14 },
+    { wave: 'sine', freq: 1800, freqEnd: 3600, duration: 0.3, volume: 0.1, delay: 0.06, vibrato: { rate: 24, depth: 60 } },
+  ],
   'enemy-die': [
     { wave: 'noise', freq: 1400, duration: 0.18, volume: 0.25, filter: { type: 'bandpass', freq: 1400, freqEnd: 300, q: 1.2 } },
     { wave: 'square', freq: 420, freqEnd: 90, duration: 0.18, volume: 0.14 },

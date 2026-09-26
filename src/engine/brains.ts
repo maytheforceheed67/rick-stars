@@ -22,13 +22,16 @@ export interface ChaserOpts {
   lungeMult?: number;
   lungeTime?: number;
   windup?: number;
+  /** Swing around to the player's side instead of walking straight in. */
+  flank?: boolean;
 }
 
 /** Walks at the player; optionally lunges after a telegraphed wind-up. */
 export function* chaser(api: EnemyApi, o: ChaserOpts = {}): Brain {
   let next = o.lungeEvery ? api.rng.float(o.lungeEvery * 0.5, o.lungeEvery) : Infinity;
   while (true) {
-    api.chase(o.speed ?? 1);
+    if (o.flank) api.flank(o.speed ?? 1);
+    else api.chase(o.speed ?? 1);
     next -= api.dt();
     if (next <= 0 && api.distToPlayer() < 260) {
       api.stop();
@@ -83,13 +86,15 @@ export interface ChargerOpts {
   chargeTime: number;
   rest: number;
   approach?: number;
+  /** Swing around to the player's side while closing in. */
+  flank?: boolean;
   onCharge?(api: EnemyApi): void;
 }
 
 /** Sizes up the player, telegraphs a line, then barrels along it. */
 export function* charger(api: EnemyApi, o: ChargerOpts): Brain {
   while (true) {
-    yield* during(api, api.rng.float(0.7, 1.4), () => api.chase(o.approach ?? 0.6));
+    yield* during(api, api.rng.float(0.7, 1.4), () => (o.flank ? api.flank(o.approach ?? 0.6) : api.chase(o.approach ?? 0.6)));
     api.stop();
     let angle = api.angleToPlayer();
     const length = api.self.def.speed * o.chargeMult * o.chargeTime;
