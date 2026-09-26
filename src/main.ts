@@ -32,7 +32,8 @@ function storage(): SaveStorage {
   }
 }
 
-const debug = new URLSearchParams(window.location.search).get('debug') === '1';
+// ?debug=1 on a dev server; #debug where the query string doesn't reach the page (hosted builds).
+const debug = new URLSearchParams(window.location.search).get('debug') === '1' || window.location.hash === '#debug';
 const registry = createRegistry();
 const problems = validateRegistry(registry);
 if (problems.length) console.error(`[rick-stars] ${problems.length} content problem(s):\n${problems.join('\n')}`);

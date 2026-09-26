@@ -72,7 +72,7 @@ There are 27 items and 3 synergies (for example Freeze Ray Mod + Frank's Switchb
 
 ## Debug mode
 
-Add `?debug=1` to the URL, for example http://localhost:5173/?debug=1. A **DEBUG** panel sits in the bottom-left corner; click it to expand it. It has:
+Add `?debug=1` to the URL, for example http://localhost:5173/?debug=1 (or `#debug` at the end of the URL where query strings don't get through, such as a hosted copy). A **DEBUG** panel sits in the bottom-left corner; click it to expand it. It has:
 
 - an FPS counter, god mode and a hitbox overlay;
 - jumping to any act or room, revealing the map, finishing the current finale stage and taking the exit;
