@@ -7,11 +7,14 @@ import type Phaser from 'phaser';
 import { createSeed, normalizeSeed } from '../engine/rng';
 import { svc } from '../engine/services';
 import type { RunScene } from '../scenes/RunScene';
+import { openCharacterSheet } from './CharacterSheetScene';
 
 export interface DebugApi {
   game?: Phaser.Game;
   run(): RunScene | null;
   startRun(opts?: { seed?: string; act?: number; episode?: string; playPrologue?: boolean }): void;
+  /** Every character's portrait and world sprite side by side. */
+  characterSheet(): void;
   [key: string]: unknown;
 }
 
@@ -28,6 +31,7 @@ export function ensureDebugApi(game?: Phaser.Game): DebugApi {
   const api: DebugApi = window.rickStars ?? {
     run: () => current,
     startRun: () => undefined,
+    characterSheet: () => undefined,
   };
   if (game) api.game = game;
   api.run = () => current;
@@ -36,6 +40,9 @@ export function ensureDebugApi(game?: Phaser.Game): DebugApi {
     if (!g) return;
     for (const key of ['Run', 'Hud', 'Cutscene', 'Pause', 'GameOver', 'Title', 'Garage', 'SeasonMap']) if (g.scene.isActive(key)) g.scene.stop(key);
     g.scene.start('Run', { episodeId: opts.episode ?? 'S01E01', seed: opts.seed ?? createSeed(), startAct: opts.act, playPrologue: opts.playPrologue });
+  };
+  api.characterSheet = () => {
+    if (api.game) openCharacterSheet(api.game);
   };
   window.rickStars = api;
   return api;
@@ -144,6 +151,7 @@ function buildPanel(): void {
   row(enemySelect, button('Spawn', () => api().spawn(enemySelect.value, false)), button('Elite', () => api().spawn(enemySelect.value, true)));
   row(button('Kill all', () => api().killAll()), button('Finish stage', () => api().finishStage()), button('Rick meter', () => api().meter()));
   row(button('Use exit', () => api().useExit()), button('Stress test', () => api().stress(40, 200)), button('Refresh lists', () => refreshSelects()));
+  row(button('Character sheet', () => api().characterSheet()));
   const seed = el('input', { placeholder: 'SEED (8 chars)', style: 'width:110px;font:11px monospace' });
   row(
     seed,

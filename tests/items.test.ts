@@ -93,9 +93,27 @@ describe('inventory', () => {
     expect(inv.add(item('dodgeball')).added).toBe(true);
     expect(inv.add(item('dodgeball')).added).toBe(false);
     expect(inv.add(item('ricks-flask')).dropped).toBeUndefined();
-    expect(inv.add(item('neutrino-bomb')).dropped).toBe('ricks-flask');
+    expect(inv.add(item('neutrino-bomb')).dropped).toEqual({ id: 'ricks-flask', charge: 3 });
     expect(inv.add(item('mystery-meat')).dropped).toBeUndefined();
-    expect(inv.add(item('travel-pillow')).dropped).toBe('mystery-meat');
+    expect(inv.add(item('travel-pillow')).dropped).toEqual({ id: 'mystery-meat' });
+  });
+
+  it("keeps an active item's charge through a swap, so swapping back can't recharge it", () => {
+    const inv = new Inventory('ricks-spare-ray-gun');
+    inv.add(item('ricks-flask'));
+    inv.spendActive();
+    expect(inv.swapsOut(item('neutrino-bomb'))).toBe('ricks-flask');
+    const first = inv.add(item('neutrino-bomb'));
+    expect(first.dropped).toEqual({ id: 'ricks-flask', charge: 0 });
+    // A fresh active item comes charged.
+    expect(inv.activeReady()).toBe(true);
+    inv.spendActive();
+    // Picking the flask back up restores its old charge, not a full one.
+    const back = inv.add(item('ricks-flask'), { charge: first.dropped!.charge });
+    expect(inv.active).toMatchObject({ id: 'ricks-flask', charge: 0 });
+    expect(inv.activeReady()).toBe(false);
+    expect(back.dropped).toEqual({ id: 'neutrino-bomb', charge: 0 });
+    expect(inv.swapsOut(item('ricks-flask'))).toBeNull();
   });
 
   it('charges active items by cleared rooms', () => {

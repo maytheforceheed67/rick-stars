@@ -9,6 +9,7 @@ import { GAME_HEIGHT, GAME_WIDTH } from './engine/constants';
 import { validateRegistry } from './engine/registry';
 import { loadSave, MemoryStorage, type SaveStorage } from './engine/save/save';
 import { initServices } from './engine/services';
+import { CharacterSheetScene } from './debug/CharacterSheetScene';
 import { ensureDebugApi } from './debug/debug';
 import { BootScene } from './scenes/BootScene';
 import { CutsceneScene } from './scenes/CutsceneScene';
@@ -52,7 +53,7 @@ const game = new Phaser.Game({
   physics: { default: 'arcade', arcade: { debug: false } },
   audio: { noAudio: true },
   render: { antialias: true },
-  scene: [BootScene, TitleScene, GarageScene, SeasonMapScene, RunScene, HudScene, CutsceneScene, PauseScene, GameOverScene],
+  scene: [BootScene, TitleScene, GarageScene, SeasonMapScene, RunScene, HudScene, CutsceneScene, PauseScene, GameOverScene, CharacterSheetScene],
 });
 
 if (debug) ensureDebugApi(game);

@@ -8,6 +8,14 @@ const RICK_HAIR = 0xa8dcec;
 const RICK_COAT = 0xeef3f6;
 const RICK_SHIRT = 0x8ec5de;
 
+// Looks follow the show's season 1 designs.
+/** Dark brown hair; dark green shirt with a brown and beige band; light blue pants. */
+const JERRY = { skin: SKIN, hair: 0x4a2c17, hairStyle: 'swoop', shirt: 0x3e7a4c, stripe: [0x8b5a33, 0xe7d6ae], brow: 0x3a2210 } as const;
+/** Wavy shoulder-length blonde bob; red v-neck polo; berry lipstick. */
+const BETH = { skin: SKIN, hair: 0xf1d38e, hairStyle: 'bob', shirt: 0xd8323f, neckline: 'v-collar', sleeves: 'short', lips: 0xc2457a, lashes: true, brow: 0xc79a4f } as const;
+/** Red hair pulled back in a ponytail; magenta tank top; white capris. */
+const SUMMER = { skin: SKIN, hair: 0xd9582a, hairStyle: 'ponytail', shirt: 0xd8327f, sleeves: 'none', brow: 0x9c3f18 } as const;
+
 export function mortySprite(shirt = MORTY_SHIRT, key = 'morty'): SpriteArt {
   return {
     key,
@@ -118,16 +126,14 @@ export const jerry: CharacterDef = {
   name: 'Jerry',
   firstAppears: 'S01E01',
   canon: true,
-  color: 0x9fcf86,
+  color: 0x5f9a6c,
   sprite: {
     key: 'jerry',
     width: 44,
     height: 62,
-    draw: (g, w, h) =>
-      drawPerson(g, w, h, { seed: 303, skin: SKIN, hair: 0x7a4a26, hairStyle: 'swoop', shirt: 0x9fcf86, pants: 0x8b7355, build: 'adult', mouth: 'frown', brow: 0x5a3416 }),
+    draw: (g, w, h) => drawPerson(g, w, h, { seed: 303, ...JERRY, pants: 0x9dbde6, shoes: 0x222222, build: 'adult', mouth: 'frown' }),
   },
-  portrait: (g, S, expr) =>
-    drawPortrait(g, S, expr, { seed: 33, skin: SKIN, hair: 0x7a4a26, hairStyle: 'swoop', shirt: 0x9fcf86, headR: 0.22, headStretch: 1.1, brow: 0x5a3416 }),
+  portrait: (g, S, expr) => drawPortrait(g, S, expr, { seed: 33, ...JERRY, headR: 0.22, headStretch: 1.1 }),
 };
 
 export const beth: CharacterDef = {
@@ -135,16 +141,14 @@ export const beth: CharacterDef = {
   name: 'Beth',
   firstAppears: 'S01E01',
   canon: true,
-  color: 0xd9434f,
+  color: 0xd8323f,
   sprite: {
     key: 'beth',
     width: 44,
     height: 60,
-    draw: (g, w, h) =>
-      drawPerson(g, w, h, { seed: 404, skin: SKIN, hair: 0xe8c77a, hairStyle: 'bob', shirt: 0xd9434f, pants: 0x3d3d5c, build: 'adult', mouth: 'flat', brow: 0xb8914a }),
+    draw: (g, w, h) => drawPerson(g, w, h, { seed: 404, ...BETH, pants: 0x3f63b0, shoes: 0xf4f4f4, build: 'adult', mouth: 'flat' }),
   },
-  portrait: (g, S, expr) =>
-    drawPortrait(g, S, expr, { seed: 44, skin: SKIN, hair: 0xe8c77a, hairStyle: 'bob', shirt: 0xd9434f, headR: 0.22, brow: 0xb8914a }),
+  portrait: (g, S, expr) => drawPortrait(g, S, expr, { seed: 44, ...BETH, headR: 0.22 }),
 };
 
 export const summer: CharacterDef = {
@@ -152,16 +156,14 @@ export const summer: CharacterDef = {
   name: 'Summer',
   firstAppears: 'S01E01',
   canon: true,
-  color: 0xf08fb0,
+  color: 0xd8327f,
   sprite: {
     key: 'summer',
     width: 42,
     height: 58,
-    draw: (g, w, h) =>
-      drawPerson(g, w, h, { seed: 505, skin: SKIN, hair: 0xd9602c, hairStyle: 'long', shirt: 0xf08fb0, pants: 0x4b6cb7, mouth: 'flat', brow: 0x9c3f18 }),
+    draw: (g, w, h) => drawPerson(g, w, h, { seed: 505, ...SUMMER, pants: 0xf2f0ea, shoes: 0x262626, mouth: 'flat' }),
   },
-  portrait: (g, S, expr) =>
-    drawPortrait(g, S, expr, { seed: 55, skin: SKIN, hair: 0xd9602c, hairStyle: 'long', shirt: 0xf08fb0, headR: 0.23, brow: 0x9c3f18 }),
+  portrait: (g, S, expr) => drawPortrait(g, S, expr, { seed: 55, ...SUMMER, headR: 0.23 }),
 };
 
 export const SHARED_CHARACTERS: CharacterDef[] = [morty, rick, jerry, beth, summer];

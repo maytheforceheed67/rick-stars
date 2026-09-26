@@ -36,6 +36,7 @@ import type {
   GameCtx,
   HitInfo,
   HitSource,
+  ItemDef,
   MechanicApi,
   MechanicDef,
   MechanicInstance,
@@ -128,6 +129,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private dead = false;
   private meterAnnounced = false;
   private interactable: Interactable | null = null;
+  /** A swap waiting for its confirming second E press. */
+  private pendingSwap: PedestalObj | null = null;
+  private pendingSwapUntil = 0;
   private readonly playerAnchor = () => ({ x: this.player.x, y: this.player.y - 48 });
   private readonly screenAnchor = () => {
     const v = this.cameras.main.worldView;
@@ -168,6 +172,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.dead = false;
     this.meterAnnounced = false;
     this.interactable = null;
+    this.pendingSwap = null;
   }
 
   create(): void {
@@ -519,6 +524,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
     this.objects.update(dt, this.player, this.stats().magnet, (p) => this.collectPickup(p));
     this.objects.tickPedestals(dt);
+    if (this.pendingSwap && (run.time > this.pendingSwapUntil || this.pendingSwap.taken || Math.hypot(this.player.x - this.pendingSwap.x, this.player.y - this.pendingSwap.y) > 110)) {
+      this.pendingSwap = null;
+    }
     this.interactable = this.objects.nearestInteractable(
       this.player,
       (p) => this.pedestalLabel(p),
@@ -761,7 +769,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     st.pickups = this.objects.pickups.filter((p) => !p.collected).map((p) => ({ id: p.def.id, x: p.x, y: p.y }));
     st.pedestals = this.objects.pedestals
       .filter((p) => !p.taken)
-      .map((p) => ({ itemId: p.ware.item?.id, pickupId: p.ware.pickup?.id, x: p.x, y: p.y, price: p.price, group: p.group }));
+      .map((p) => ({ itemId: p.ware.item?.id, pickupId: p.ware.pickup?.id, x: p.x, y: p.y, price: p.price, group: p.group, charge: p.charge }));
     this.teardownRoom();
   }
 
@@ -1563,19 +1571,19 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   // ---- items and pickups -----------------------------------------------------------------------
 
-  giveItem(id: ContentId, silent = false): void {
+  giveItem(id: ContentId, silent = false, charge?: number): void {
     const item = this.reg.items.get(id);
     if (!item) return;
     const inv = this.run.inventory;
     const before = new Set(activeSynergies(inv.owned(), this.reg.synergies).map((s) => s.id));
-    const res = inv.add(item);
+    const res = inv.add(item, { charge });
     if (!res.added) {
       this.hud.toast(`You already have ${item.name}.`);
       return;
     }
     if (res.dropped) {
-      const at = this.openSpotNear(this.player.x + TILE, this.player.y);
-      this.placeWare({ itemId: res.dropped, x: at.x, y: at.y });
+      const at = this.dropSpot();
+      this.placeWare({ itemId: res.dropped.id, x: at.x, y: at.y, charge: res.dropped.charge }, false);
     }
     this.run.stats.itemsFound.push(id);
     this.run.offered.add(id);
@@ -1652,18 +1660,59 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     return id;
   }
 
-  private placeWare(p: PedestalState): void {
+  private placeWare(p: PedestalState, armed = true): void {
     const ware: Ware = { item: p.itemId ? this.reg.items.get(p.itemId) : undefined, pickup: p.pickupId ? this.reg.pickups.get(p.pickupId) : undefined };
     if (!ware.item && !ware.pickup) return;
-    this.objects.spawnPedestal(ware, p.x, p.y, p.price, p.group);
+    this.objects.spawnPedestal(ware, p.x, p.y, p.price, p.group, { charge: p.charge, armed });
+  }
+
+  /** Where a swapped-out item lands: a step and a half from Morty, on open floor. */
+  private dropSpot(): Vec {
+    const view = this.roomView!;
+    const aim = this.player.aimAngle;
+    let best = this.openSpotNear(this.player.x - TILE * 1.6, this.player.y);
+    let bestScore = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      // Prefer dropping behind Morty, away from where he's facing.
+      const a = aim + Math.PI + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (Math.PI / 4);
+      const x = this.player.x + Math.cos(a) * TILE * 1.6;
+      const y = this.player.y + Math.sin(a) * TILE * 1.6;
+      if (view.tileAt(x, y) !== 'floor') continue;
+      const score = -i;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { x, y };
+      }
+    }
+    return best;
+  }
+
+  /** The held item a pedestal's item would replace, if taking it is a swap. */
+  private swapTarget(p: PedestalObj): ItemDef | null {
+    if (!p.ware.item) return null;
+    const out = this.run.inventory.swapsOut(p.ware.item);
+    return out ? (this.reg.items.get(out) ?? null) : null;
   }
 
   private pedestalLabel(p: PedestalObj): string {
-    return p.price !== undefined ? `Buy ${p.name} (${p.price} Scrap)` : `Take ${p.name}`;
+    const held = this.swapTarget(p);
+    const price = p.price !== undefined ? ` (${p.price} Scrap)` : '';
+    if (held && this.pendingSwap === p) return `Swap ${held.name} for ${p.name}?${price} Press E again`;
+    if (held) return `${p.price !== undefined ? 'Buy' : 'Take'} ${p.name}${price} (swaps out ${held.name})`;
+    return p.price !== undefined ? `Buy ${p.name}${price}` : `Take ${p.name}`;
   }
 
   private takePedestal(p: PedestalObj): void {
     const run = this.run;
+    const held = this.swapTarget(p);
+    if (held && this.pendingSwap !== p) {
+      // Swaps ask first; the second press confirms.
+      this.pendingSwap = p;
+      this.pendingSwapUntil = run.time + 4;
+      this.sfx('ui-move');
+      return;
+    }
+    this.pendingSwap = null;
     if (p.price !== undefined) {
       if (run.scrap < p.price) {
         this.sfx('ui-deny');
@@ -1680,7 +1729,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     } else if (p.ware.pickup && p.ware.pickup.collect(this.ctx) === false) {
       return;
     }
-    if (p.ware.item) this.giveItem(p.ware.item.id);
+    if (p.ware.item) this.giveItem(p.ware.item.id, false, p.charge);
     if (p.group) {
       for (const o of this.objects.pedestalsInGroup(p.group)) {
         if (o === p) continue;

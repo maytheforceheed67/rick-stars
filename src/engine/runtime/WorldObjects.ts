@@ -49,6 +49,11 @@ export interface Ware {
 
 export class PedestalObj {
   taken = false;
+  /**
+   * A freshly dropped item can't be picked up until Morty has stepped away from it, so a swap
+   * never bounces straight back.
+   */
+  armed = true;
   readonly base: Phaser.GameObjects.Image;
   readonly icon: Phaser.GameObjects.Image;
   readonly label: Phaser.GameObjects.Text;
@@ -62,6 +67,7 @@ export class PedestalObj {
     readonly y: number,
     readonly price: number | undefined,
     readonly group: string | undefined,
+    readonly charge?: number,
   ) {
     this.base = scene.add.image(x, y + 8, 'pedestal').setDepth(y);
     const tex = ware.item ? `icon-${ware.item.id}` : (ware.pickup?.art ?? '__MISSING');
@@ -175,8 +181,9 @@ export class WorldObjects {
     return p;
   }
 
-  spawnPedestal(ware: Ware, x: number, y: number, price?: number, group?: string): PedestalObj {
-    const p = new PedestalObj(this.scene, ware, x, y, price, group);
+  spawnPedestal(ware: Ware, x: number, y: number, price?: number, group?: string, opts: { charge?: number; armed?: boolean } = {}): PedestalObj {
+    const p = new PedestalObj(this.scene, ware, x, y, price, group, opts.charge);
+    p.armed = opts.armed ?? true;
     this.pedestals.push(p);
     return p;
   }
@@ -214,6 +221,10 @@ export class WorldObjects {
     for (const p of this.pedestals) {
       if (p.taken) continue;
       const d = Math.hypot(player.x - p.x, player.y - p.y);
+      if (!p.armed) {
+        if (d > 110) p.armed = true;
+        continue;
+      }
       p.update(0, d < 110);
       if (d < bestD) {
         bestD = d;

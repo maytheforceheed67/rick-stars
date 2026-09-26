@@ -1,8 +1,8 @@
 /** Characters introduced in the Pilot. */
 import { wonkyRect } from '../../../engine/art/draw';
 import type { CharacterDef, Graphics } from '../../../engine/types';
-import { drawPortrait, SKIN } from '../../shared/art';
-import { drawBugHead, PILOT_ENEMY_ART } from './art';
+import { drawPortrait } from '../../shared/art';
+import { drawBugHead, GOLDENFOLD, GOLDENFOLD_SPRITE, PILOT_ENEMY_ART, PRINCIPAL } from './art';
 
 function bugPortrait(g: Graphics, S: number, cap?: number): void {
   wonkyRect(g, S * 0.12, S * 0.78, S * 0.76, S * 0.35, { fill: cap ?? 0x3d4f7a, seed: 3, radius: S * 0.12, lineWidth: 4 });
@@ -26,9 +26,10 @@ export const goldenfold: CharacterDef = {
   name: 'Mr. Goldenfold',
   firstAppears: 'S01E01',
   canon: true,
-  color: 0xc9a86b,
+  color: 0xf2c23a,
+  sprite: GOLDENFOLD_SPRITE,
   portrait: (g, S, expr) =>
-    drawPortrait(g, S, expr, { seed: 77, skin: SKIN, hair: 0x8a7a66, hairStyle: 'sides', shirt: 0xe9e4d4, headR: 0.24, glasses: true, brow: 0x6a5a46 }),
+    drawPortrait(g, S, expr, { seed: 77, ...GOLDENFOLD, headR: 0.24 }),
 };
 
 export const principal: CharacterDef = {
@@ -36,9 +37,9 @@ export const principal: CharacterDef = {
   name: 'Principal Vagina',
   firstAppears: 'S01E01',
   canon: true,
-  color: 0x8a8fb8,
+  color: 0x6f8fd0,
   portrait: (g, S, expr) =>
-    drawPortrait(g, S, expr, { seed: 88, skin: SKIN, hair: 0xd8d8d8, hairStyle: 'sides', shirt: 0x4a4f6e, coat: 0x3a3f58, headR: 0.24, glasses: true, brow: 0x9a9a9a }),
+    drawPortrait(g, S, expr, { seed: 88, ...PRINCIPAL, headR: 0.24 }),
 };
 
 export const gromflomite: CharacterDef = {

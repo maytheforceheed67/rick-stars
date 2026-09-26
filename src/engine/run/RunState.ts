@@ -23,6 +23,8 @@ export interface PedestalState {
   y: number;
   price?: number;
   group?: string;
+  /** Remaining charge of a dropped active item. */
+  charge?: number;
 }
 
 export interface RoomState {

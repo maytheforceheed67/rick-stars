@@ -3,7 +3,7 @@
  */
 import { blob, dot, eye, INK, jitter, mouth, PORTAL_GREEN, portalSwirl, shade, stroke, wonkyPoly, wonkyRect } from '../../../engine/art/draw';
 import type { Graphics, SpriteArt } from '../../../engine/types';
-import { drawPerson, SKIN } from '../../shared/art';
+import { drawPerson } from '../../shared/art';
 
 // ---- people -------------------------------------------------------------------------------------
 
@@ -36,23 +36,39 @@ export function drawFrank(g: Graphics, w: number, h: number, frozen = false): vo
   }
 }
 
+/**
+ * Mr. Goldenfold as the show draws him: an African-American man with a black mustache and black,
+ * balding hair, in a yellow v-neck sweater over an orange undershirt and a grey tie. No glasses.
+ */
+export const GOLDENFOLD = {
+  skin: 0x8c5b3e,
+  hair: 0x1c1612,
+  hairStyle: 'sides',
+  shirt: 0xf2c23a,
+  neckline: 'v',
+  undershirt: 0xf0892a,
+  tie: 0x8b9099,
+  mustache: 0x1c1612,
+  brow: 0x1c1612,
+} as const;
+
+/** Principal Vagina: an older white man with a dark buzz cut, a blue shirt and a darker blue tie. */
+export const PRINCIPAL = {
+  skin: 0xf1d3b8,
+  hair: 0x2e2e2e,
+  hairStyle: 'stubble',
+  shirt: 0x6f8fd0,
+  neckline: 'collar',
+  tie: 0x2d4a8a,
+  brow: 0x5a5a5a,
+} as const;
+
 export function drawGoldenfold(g: Graphics, w: number, h: number): void {
-  drawPerson(g, w, h, {
-    seed: 707,
-    skin: SKIN,
-    hair: 0x8a7a66,
-    hairStyle: 'sides',
-    shirt: 0xe9e4d4,
-    pants: 0x5a5a6e,
-    build: 'adult',
-    eyes: 'normal',
-    mouth: 'flat',
-    glasses: true,
-    brow: 0x6a5a46,
-  });
-  // Tie
-  wonkyPoly(g, [[w / 2 - 3, h * 0.47], [w / 2 + 3, h * 0.47], [w / 2 + 4, h * 0.66], [w / 2, h * 0.7], [w / 2 - 4, h * 0.66]], { fill: 0x9c3f58, seed: 71, lineWidth: 2 });
+  drawPerson(g, w, h, { seed: 707, ...GOLDENFOLD, pants: 0x6a5646, build: 'adult', eyes: 'normal', mouth: 'flat' });
 }
+
+/** Used by his character entry and as a room prop. */
+export const GOLDENFOLD_SPRITE: SpriteArt = { key: 'goldenfold', width: 44, height: 62, draw: (g, w, h) => drawGoldenfold(g, w, h) };
 
 /** Gromflomite head: big glossy eyes, antennae, mandibles. */
 export function drawBugHead(g: Graphics, cx: number, cy: number, r: number, seed: number, skin = 0x8fb573, cap?: number): void {
@@ -352,12 +368,7 @@ export const PILOT_PROP_ART: SpriteArt[] = [
       dot(g, w * 0.5, h * 0.62, 4, PORTAL_GREEN);
     },
   },
-  {
-    key: 'goldenfold',
-    width: 44,
-    height: 62,
-    draw: (g, w, h) => drawGoldenfold(g, w, h),
-  },
+  GOLDENFOLD_SPRITE,
   {
     key: 'goldenfold-desk',
     width: 110,
