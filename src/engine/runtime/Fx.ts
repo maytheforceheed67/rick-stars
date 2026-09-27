@@ -3,6 +3,7 @@
  * Shake and flashes follow the player's accessibility settings.
  */
 import Phaser from 'phaser';
+import { FEEL } from '../../content/balance';
 import type { Settings } from '../save/save';
 import type { Vec } from '../types';
 import { FONT } from '../ui/text';
@@ -47,6 +48,10 @@ interface Bubble {
 
 export class Fx {
   private readonly emitters = new Map<BurstStyle, Phaser.GameObjects.Particles.ParticleEmitter>();
+  /** Sparks sprayed in a direction: shots connecting, and bouncing off. */
+  private readonly sparks: Phaser.GameObjects.Particles.ParticleEmitter;
+  /** Where shots connected this frame (impacts right on top of each other merge). */
+  private impacts: Vec[] = [];
   private bubbles: Bubble[] = [];
   private hitStopTimer: Phaser.Time.TimerEvent | null = null;
 
@@ -69,6 +74,59 @@ export class Fx {
       e.setDepth(4500);
       this.emitters.set(style, e);
     }
+    this.sparks = scene.add.particles(0, 0, 'fx-spark', {
+      lifespan: 200,
+      speed: { min: 150, max: 360 },
+      scale: { start: 1.2, end: 0.2 },
+      alpha: { start: 1, end: 0.2 },
+      tint: [0xffffff, 0xfff2a8, 0xffd166, 0xffb347],
+      emitting: false,
+      // Each spark points the way it flies.
+      emitCallback: (p: Phaser.GameObjects.Particles.Particle) => {
+        p.rotation = Math.atan2(p.velocityY, p.velocityX);
+      },
+    });
+    this.sparks.setDepth(4650);
+  }
+
+  /** Particles follow the game's slow motion (a perfect dodge), like everything else. */
+  setTimeScale(k: number): void {
+    this.emitters.forEach((e) => (e.timeScale = k));
+    this.sparks.timeScale = k;
+  }
+
+  /**
+   * A shot connecting: a white burst at the contact point and sparks sprayed on along the shot,
+   * bigger for crits and heavy hits (`power` 1-3). Impacts landing on top of each other in the
+   * same frame merge into one, so a volley doesn't turn to mush.
+   */
+  impact(x: number, y: number, angle: number, power = 1, color = 0xfff2a8): void {
+    if (this.merged(x, y)) return;
+    this.spray(x, y, angle, power, 38);
+    this.pop(x, y, 'fx-star', color, 0.55 * power, 1.5 * power, 90, angle);
+  }
+
+  /** A shot bouncing off something it can't hurt (a shield, Scary Terry): sparks glance back off it. */
+  deflect(x: number, y: number, angle: number): void {
+    if (this.merged(x, y)) return;
+    this.spray(x, y, angle + Math.PI, 1, 55);
+    this.pop(x, y, 'fx-star', 0xcfefff, 0.5, 1.2, 80, angle);
+  }
+
+  private merged(x: number, y: number): boolean {
+    if (this.impacts.some((p) => Math.hypot(p.x - x, p.y - y) < FEEL.hits.mergeRadius)) return true;
+    this.impacts.push({ x, y });
+    return false;
+  }
+
+  private spray(x: number, y: number, angle: number, power: number, spreadDeg: number): void {
+    const deg = Phaser.Math.RadToDeg(angle);
+    const e = this.sparks;
+    const k = 0.8 + 0.2 * power;
+    // Point this burst (the emitter's ops take a fresh range each time; no rebuild).
+    e.ops.angle.loadConfig({ angle: { min: deg - spreadDeg, max: deg + spreadDeg } });
+    e.ops.speedX.loadConfig({ speed: { min: 140 * k, max: 340 * k } }, 'speed');
+    e.explode(Math.round(FEEL.hits.sparks * (0.6 + 0.4 * power)), x, y);
   }
 
   burst(style: BurstStyle, x: number, y: number, count?: number): void {
@@ -175,6 +233,7 @@ export class Fx {
   }
 
   update(dt: number): void {
+    this.impacts.length = 0;
     for (const b of this.bubbles) {
       b.life -= dt;
       const p = b.follow?.();
@@ -232,5 +291,6 @@ export class Fx {
     this.clearBubbles();
     this.emitters.forEach((e) => e.destroy());
     this.emitters.clear();
+    this.sparks.destroy();
   }
 }

@@ -40,6 +40,17 @@ export const SFX: Record<string, SfxRecipe> = {
     { wave: 'triangle', freq: 900, freqEnd: 500, duration: 0.25, volume: 0.12, vibrato: { rate: 14, depth: 80 } },
     { wave: 'triangle', freq: 700, freqEnd: 380, duration: 0.3, volume: 0.1, delay: 0.12 },
   ],
+  // A shot bouncing off something it can't hurt: a hard metal ping.
+  clink: [
+    { wave: 'triangle', freq: 2600, freqEnd: 1900, duration: 0.07, volume: 0.13 },
+    { wave: 'square', freq: 3900, freqEnd: 3300, duration: 0.04, volume: 0.05 },
+    { wave: 'noise', freq: 6000, duration: 0.03, volume: 0.08, filter: { type: 'highpass', freq: 4000 } },
+  ],
+  // Ice cracking.
+  crack: [
+    { wave: 'noise', freq: 3000, duration: 0.08, volume: 0.2, filter: { type: 'bandpass', freq: 3200, freqEnd: 1800, q: 3 } },
+    { wave: 'triangle', freq: 1500, freqEnd: 700, duration: 0.06, volume: 0.1 },
+  ],
   'shield-pop': [
     { wave: 'noise', freq: 4000, duration: 0.18, volume: 0.18, filter: { type: 'highpass', freq: 2500 } },
     { wave: 'triangle', freq: 1400, freqEnd: 500, duration: 0.2, volume: 0.12 },

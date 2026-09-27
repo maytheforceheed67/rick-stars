@@ -3,8 +3,17 @@
  * low blocks don't). Keeping them out of the physics engine makes 200+ shots cheap.
  */
 import Phaser from 'phaser';
+import { TEXTURE_PAD } from '../art/textures';
 import type { HitSource } from '../types';
 import type { RoomView } from './RoomView';
+
+/**
+ * How a shot reads at a glance, so Morty's shots never look like enemy fire, even without color:
+ * - 'bolt': Morty's energy shot, a white-hot core edged in its color, streaming a tail;
+ * - 'object': something thrown, its own sprite with a bright rim and a trail behind it;
+ * - 'hostile': an enemy shot, on a round, warm, dark-rimmed disc (never a streak).
+ */
+export type ShotLook = 'bolt' | 'object' | 'hostile';
 
 export interface ProjectileOpts {
   x: number;
@@ -47,6 +56,8 @@ export interface ProjectileOpts {
    * which is what hits walls and enemies (x, y), like a shadow.
    */
   lift?: number;
+  /** How it reads (see ShotLook); without one, just its sprite. */
+  look?: ShotLook;
 }
 
 export class Projectile {
@@ -83,10 +94,17 @@ export class Projectile {
   readonly img: Phaser.GameObjects.Image;
   /** Soft additive halo that makes the player's shots read as bright energy. */
   private readonly glow?: Phaser.GameObjects.Image;
+  /** Behind the shot: a bolt's colored body, a thrown thing's rim, an enemy shot's disc. */
+  private readonly back: Phaser.GameObjects.Image;
+  /** A thrown thing's trail. */
+  private readonly trail: Phaser.GameObjects.Image;
+  look: ShotLook | undefined;
 
   constructor(scene: Phaser.Scene, depth: number, glow: boolean) {
+    this.trail = scene.add.image(0, 0, 'shot-trail').setVisible(false).setDepth(depth - 2);
+    this.back = scene.add.image(0, 0, '__WHITE').setVisible(false).setDepth(depth - 1);
     this.img = scene.add.image(0, 0, '__WHITE').setVisible(false).setActive(false).setDepth(depth);
-    if (glow) this.glow = scene.add.image(0, 0, 'fx-dot').setVisible(false).setDepth(depth - 1).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.55);
+    if (glow) this.glow = scene.add.image(0, 0, 'fx-dot').setVisible(false).setDepth(depth - 3).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.4);
   }
 
   /** Where it's drawn (its floor point, lifted). */
@@ -94,10 +112,21 @@ export class Projectile {
     return this.y - this.lift;
   }
 
-  /** Keeps the picture (and its halo) on the shot. */
+  /** Keeps every layer of its picture on the shot, pointing where it's going. */
   syncGlow(): void {
-    this.img.setPosition(this.x, this.drawY);
-    this.glow?.setPosition(this.x, this.drawY);
+    const y = this.drawY;
+    this.img.setPosition(this.x, y);
+    this.glow?.setPosition(this.x, y);
+    const heading = Math.atan2(this.vy, this.vx);
+    if (this.look === 'bolt') {
+      this.back.setPosition(this.x, y).setRotation(heading);
+      this.img.setRotation(heading);
+    } else if (this.look === 'object') {
+      this.back.setPosition(this.x, y).setRotation(this.img.rotation).setFlipX(this.img.flipX);
+      this.trail.setPosition(this.x, y).setRotation(heading);
+    } else if (this.look === 'hostile') {
+      this.back.setPosition(this.x, y);
+    }
   }
 
   launch(o: ProjectileOpts): void {
@@ -129,25 +158,68 @@ export class Projectile {
     this.lift = o.lift ?? 0;
     this.hits.clear();
     if (o.ignore !== undefined) this.hits.add(o.ignore);
+    this.look = o.look;
     const scale = o.radius / (o.baseRadius ?? 8);
-    this.img.setTexture(o.texture).setScale(scale).setPosition(o.x, o.y - this.lift).setVisible(true).setActive(true).setAlpha(1);
-    if (o.tint !== undefined) this.img.setTint(o.tint);
-    else this.img.clearTint();
+    const back = this.back;
+    back.clearTint().setAlpha(1).setFlipX(false).setScale(1).setOrigin(0.5);
+    this.trail.setVisible(false);
+    if (o.look === 'bolt') {
+      // A white-hot core on a body and tail in the shot's color. Both are anchored at the head.
+      const k = o.radius / 6;
+      back
+        .setTexture('shot-bolt-edge')
+        .setOrigin((TEXTURE_PAD + 32) / (40 + TEXTURE_PAD * 2), 0.5)
+        .setScale(k)
+        .setTint(o.tint ?? 0x97ce4c)
+        .setVisible(true);
+      this.img
+        .setTexture('shot-bolt-core')
+        .setOrigin((TEXTURE_PAD + 10) / (18 + TEXTURE_PAD * 2), 0.5)
+        .setScale(k)
+        .clearTint();
+    } else {
+      this.img.setTexture(o.texture).setOrigin(0.5).setScale(scale);
+      if (o.tint !== undefined) this.img.setTint(o.tint);
+      else this.img.clearTint();
+      if (o.look === 'object') {
+        // Its own sprite, rimmed in white so it pops off any floor, streaming a colored trail.
+        back.setTexture(o.texture).setScale(scale * 1.28).setTintFill(0xffffff).setAlpha(0.9).setVisible(true);
+        const len = Math.max(0.8, o.radius / 7);
+        this.trail
+          .setOrigin((TEXTURE_PAD + 38) / (40 + TEXTURE_PAD * 2), 0.5)
+          .setScale(len * 1.1, len)
+          .setTint(o.glow ?? o.tint ?? 0xffffff)
+          .setAlpha(0.75)
+          .setVisible(true);
+      } else if (o.look === 'hostile') {
+        // A round warm disc behind whatever it is (a book, a stamp, kibble...).
+        back.setTexture('shot-hostile').setScale((o.radius * 2.9) / 22).setVisible(true);
+      } else {
+        back.setVisible(false);
+      }
+    }
+    this.img.setPosition(o.x, o.y - this.lift).setVisible(true).setActive(true).setAlpha(1);
     this.img.setRotation(this.spin || this.upright ? 0 : o.angle).setFlipX(this.upright && Math.cos(o.angle) < 0);
     if (this.glow) {
-      this.glow.setPosition(o.x, o.y - this.lift).setScale((o.radius * 3.4) / 8).setVisible(true).setTint(o.glow ?? o.tint ?? 0xffffff);
+      const size = o.look === 'bolt' ? 2.6 : 3.4;
+      this.glow.setPosition(o.x, o.y - this.lift).setScale((o.radius * size) / 8).setVisible(true).setTint(o.glow ?? o.tint ?? 0xffffff);
     }
+    this.syncGlow();
   }
 
   kill(): void {
     this.active = false;
     this.img.setVisible(false).setActive(false);
     this.glow?.setVisible(false);
+    this.back.setVisible(false);
+    this.trail.setVisible(false);
   }
 
   destroy(): void {
     this.img.destroy();
     this.glow?.destroy();
+    this.back.destroy();
+    this.trail.destroy();
   }
 }
 
@@ -222,10 +294,10 @@ export class ProjectilePool {
       }
       p.x = nx;
       p.y = ny;
-      p.syncGlow();
       if (p.spin) p.img.angle += p.spin * dt;
       else if (p.upright) p.img.setFlipX(p.vx < 0);
       else p.img.setRotation(Math.atan2(p.vy, p.vx));
+      p.syncGlow();
     }
   }
 

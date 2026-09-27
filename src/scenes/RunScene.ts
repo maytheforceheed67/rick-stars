@@ -137,6 +137,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   /** A click (or arrow-key press) that hasn't reached the trigger yet; never dropped, even mid hit-stop. */
   private firePressed = false;
+  /** Hit sounds played this frame (capped, so a volley doesn't clip). */
+  private hitSounds = 0;
   private frameDelta = 0;
   private statsCache: StatBlock | null = null;
   private sourcesCache: HookSource[] | null = null;
@@ -429,6 +431,13 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   sfx(id: string): void {
     svc().audio.play(id);
+  }
+
+  /** A hit's sound, at most FEEL.hits.maxSoundsPerFrame of them a frame. */
+  private hitSfx(id: string): void {
+    if (this.hitSounds >= FEEL.hits.maxSoundsPerFrame) return;
+    this.hitSounds++;
+    this.sfx(id);
   }
 
   shake(intensity: number, ms: number): void {
@@ -855,6 +864,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.updateSlowMo(time);
     const dt = Math.min(delta / 1000, 1 / 20) * this.timeFactor;
     this.frameDelta = dt;
+    this.hitSounds = 0;
     this.fx.update(dt);
     this.applyCameraKick(delta / 1000);
     if (this.worldHold) {
@@ -904,7 +914,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       dt,
       this.roomView,
       () => this.sfx('bounce'),
-      (p, wall) => wall && this.fx.burst('hit', p.x, p.y, 3),
+      (p, wall) => wall && this.fx.burst('hit', p.x, p.drawY, 3),
       (p) => this.homingTarget(p),
     );
     this.checkPlayerShots();
@@ -912,7 +922,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       dt,
       this.roomView,
       () => undefined,
-      (p, wall) => wall && this.fx.burst('hit', p.x, p.y, 2),
+      (p, wall) => wall && this.fx.burst('hit', p.x, p.drawY, 2),
     );
     this.checkEnemyShots();
     const reduced = this.settings().reducedFlash;
@@ -2148,7 +2158,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
           bounces: Math.round(st.bounces),
           // Junk cycles through its pile in order, so the look never touches the gameplay RNG.
           texture,
-          tint: freezes || thrown ? undefined : crit ? 0xffd54a : w.color,
+          // A bolt from a gun (an icy one if it freezes), or the thing he threw.
+          look: thrown && !freezes ? 'object' : 'bolt',
+          tint: freezes ? 0x9fdcff : thrown ? undefined : crit ? 0xffd54a : w.color,
           glow,
           spin: freezes ? 0 : w.spin,
           source: 'shot',
@@ -2315,6 +2327,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
         tag: sourceName,
         applies: spec.applies,
         lift: spec.lift,
+        look: 'hostile',
       });
     }
   }
@@ -2331,8 +2344,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       radius: spec.radius ?? 7,
       life: spec.life ?? 0.7,
       texture: custom ? spec.texture! : ice ? 'shot-ice' : 'shot-player',
+      look: custom ? 'object' : 'bolt',
       // Content sprites keep their own colors; energy bolts take the tint.
-      tint: ice || custom ? undefined : (spec.color ?? 0x97ce4c),
+      tint: custom ? undefined : ice ? 0x9fdcff : (spec.color ?? 0x97ce4c),
       glow: spec.color,
       spin: spec.spin,
       upright: spec.upright,
@@ -2354,8 +2368,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
           const facing = (e.memory.facing as number | undefined) ?? Math.atan2(this.player.y - e.y, this.player.x - e.x);
           const diff = Math.abs(Math.atan2(Math.sin(from - facing), Math.cos(from - facing)));
           if (diff < ((e.def.shieldArc / 2) * Math.PI) / 180) {
-            this.fx.burst('spark', p.x, p.y, 5);
-            this.sfx('bounce');
+            // Off the riot shield: a hard clink, and the sparks glance back.
+            this.fx.deflect(p.x, p.drawY, Math.atan2(p.vy, p.vx));
+            this.hitSfx('clink');
             p.kill();
             return;
           }
@@ -2369,9 +2384,11 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private shotHits(p: Projectile, e: Enemy): void {
     p.hits.add(e.uid);
     const angle = Math.atan2(p.vy, p.vx);
+    // Right where it connects: sparks sprayed on along the shot, bigger for heavy hits and crits.
+    // Something it can't hurt (a shield bubble, Scary Terry) glances it off instead.
+    if (e.def.stalker || e.shieldHits > 0) this.fx.deflect(p.x, p.drawY, angle);
+    else this.fx.impact(p.x, p.drawY, angle, Math.min(2.5, p.damage / BASE_STATS.damage) + (p.crit ? 0.8 : 0), p.crit ? 0xffd54a : 0xfff2a8);
     this.hitEnemy(e, p.damage, { source: p.source, tag: p.tag, bounced: p.bounced, angle, crit: p.crit });
-    this.fx.burst('spark', p.x, p.y, 5);
-    this.fx.ring(p.x, p.y, 0xfff2a8, 16, 150);
     if (p.crit) {
       this.fx.floatText(e.x, e.y - e.displayHeight * e.originY - 8, 'CRIT!', '#ffd54a', 22);
       this.fx.ring(p.x, p.y, 0xffd54a, 44, 240, 4);
@@ -2423,6 +2440,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
         radius: Math.max(4, p.radius * 0.55),
         life: SHOTS.splitLife,
         texture: base.texture,
+        look: base.look,
         tint: base.tint,
         glow: base.glow,
         spin: base.spin,
@@ -2575,11 +2593,13 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       if (opts.source === 'explosion' || opts.source === 'rick') {
         e.breakShield();
       } else if (opts.source !== 'poison') {
-        // The bubble soaks the hit.
+        // The bubble soaks the hit with a hard clink, until it pops.
         const popped = e.absorbHit();
-        this.fx.burst('spark', e.x, e.y - 10, popped ? 12 : 4);
-        if (popped) this.fx.ring(e.x, e.y - 10, 0x7fdcff, e.radius * 2.6, 260, 4);
-        this.sfx(popped ? 'shield-pop' : 'bounce');
+        if (popped) {
+          this.fx.burst('spark', e.x, e.y - 10, 12);
+          this.fx.ring(e.x, e.y - 10, 0x7fdcff, e.radius * 2.6, 260, 4);
+        }
+        this.hitSfx(popped ? 'shield-pop' : 'clink');
         return;
       }
     }
@@ -2589,10 +2609,11 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     let shatter = false;
     if (wasFrozen && opts.source !== 'poison') {
       if (e.boss) {
+        // The ice cracks off him, and the hit lands hard.
         dmg *= ENEMIES.bossShatterMult;
         e.unfreeze();
         this.fx.burst('ice', e.x, e.y, 10);
-        this.sfx('shatter');
+        this.hitSfx('crack');
       } else {
         shatter = true;
         dmg = Math.max(dmg, e.hp);
@@ -2619,7 +2640,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     if (killed && e.alive) {
       if (e === this.bossEnemy && e.def.boss?.dazed) this.dazeBoss(e);
       else this.killEnemy(e, info, shatter);
-    } else if (!killed) this.sfx(dmg >= 8 ? 'hit-heavy' : 'hit');
+    } else if (!killed) this.hitSfx(dmg >= 8 ? 'hit-heavy' : 'hit');
   }
 
   /** Stalkers can't be hurt: a hit shoves them back, and enough hits leave them dizzy for a moment. */
@@ -2629,6 +2650,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     if (e.frozen) {
       e.unfreeze();
       this.fx.burst('ice', e.x, e.y, 8);
+      this.hitSfx('crack');
     }
     if (angle !== undefined) e.knock(angle, this.stats().knockback * 1.4);
     if (e.stunned) return;
@@ -2638,9 +2660,10 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       e.stun(spec.staggerSeconds);
       this.fx.floatText(e.x, e.y - e.displayHeight * e.originY - 6, 'DIZZY!', '#ffe27a', 20);
       this.fx.burst('spark', e.x, e.y - 20, 10);
-      this.sfx('hit-heavy');
+      this.hitSfx('hit-heavy');
     } else {
-      this.sfx('bounce');
+      // He can't be hurt: it clinks off him.
+      this.hitSfx('clink');
     }
   }
 
@@ -2842,6 +2865,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.slowMoUntil = this.time.now + seconds * 1000;
     this.physics.world.timeScale = 1 / factor;
     this.tweens.timeScale = factor;
+    this.fx.setTimeScale(factor);
   }
 
   private updateSlowMo(now: number): void {
@@ -2849,6 +2873,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.timeFactor = 1;
     this.physics.world.timeScale = 1;
     this.tweens.timeScale = 1;
+    this.fx.setTimeScale(1);
   }
 
   private makeStage(): Stage {

@@ -202,6 +202,21 @@ export const FEEL = {
     swingDeg: 70,
     swingSeconds: 0.16,
   },
+  hits: {
+    /** A hit fills the enemy solid white for this long (ms, 60-80). */
+    flashMs: 70,
+    /** Then it squashes and stretches back over this long (s), by this much. */
+    popSeconds: 0.09,
+    popAmount: 0.2,
+    /** Bosses and heavy enemies resist knockback, but a hit always shoves them at least this hard (px/s). */
+    minTwitch: 55,
+    /** Sparks sprayed on along the shot at the contact point (more for crits and heavy hits). */
+    sparks: 6,
+    /** Impacts this close together in one frame merge into one burst of sparks. */
+    mergeRadius: 22,
+    /** At most this many hit sounds in one frame, so a volley doesn't clip. */
+    maxSoundsPerFrame: 2,
+  },
 };
 
 export const ENEMIES = {

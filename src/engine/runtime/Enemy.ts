@@ -3,7 +3,7 @@
  * talks to the game only through the EnemyApi built here.
  */
 import Phaser from 'phaser';
-import { ENEMIES } from '../../content/balance';
+import { ENEMIES, FEEL } from '../../content/balance';
 import { TEXTURE_PAD } from '../art/textures';
 import { TILE } from '../constants';
 import type { Rng } from '../rng';
@@ -350,16 +350,18 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
     this.setNameplate(null);
   }
 
+  /** A hit landed: filled solid white for a moment, then a squash-and-stretch pop. */
   flashHit(): void {
-    this.flashLeft = 0.08;
+    this.flashLeft = FEEL.hits.flashMs / 1000;
     this.flinch = 1;
-    if (this.host.settings().reducedFlash) this.setTint(0xffc0c0);
-    else this.setTintFill(0xffffff);
+    // A real fill either way; Reduced flashes makes it softer than stark white.
+    this.setTintFill(this.host.settings().reducedFlash ? 0xffd6d6 : 0xffffff);
   }
 
   knock(angle: number, force: number): void {
     const resist = this.boss ? 0.9 : (this.def.knockbackResist ?? 0);
-    const f = force * (1 - resist);
+    // Bosses and heavies shrug off most of it, but every hit still visibly moves them.
+    const f = force > 0 ? Math.max(force * (1 - resist), FEEL.hits.minTwitch) : 0;
     this.knockVx += Math.cos(angle) * f;
     this.knockVy += Math.sin(angle) * f;
   }
@@ -462,9 +464,11 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   private syncVisuals(time: number): void {
     this.setDepth(this.def.hazard?.flat ? -350 : this.y);
     if (this.flinch > 0) {
-      this.flinch = Math.max(0, this.flinch - this.host.frameDt() * 9);
-      const f = this.flinch * (this.boss ? 0.35 : 1);
-      this.setScale(this.baseScale * (1 + 0.16 * f), this.baseScale * (1 - 0.13 * f));
+      // Squashed flat by the hit, a little stretch as it springs back, then at rest.
+      this.flinch = Math.max(0, this.flinch - this.host.frameDt() / FEEL.hits.popSeconds);
+      const u = 1 - this.flinch;
+      const f = Math.cos(1.5 * Math.PI * u) * (1 - u) * FEEL.hits.popAmount * (this.boss ? 0.45 : 1);
+      this.setScale(this.baseScale * (1 + f), this.baseScale * (1 - f * 0.85));
     } else if (this.scaleX !== this.baseScale || this.scaleY !== this.baseScale) {
       this.setScale(this.baseScale);
     }

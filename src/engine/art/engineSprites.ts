@@ -35,6 +35,66 @@ export const ENGINE_SPRITES: SpriteArt[] = [
   },
   orb('shot-orb', 0xff6a3d, 0xffe0a8),
   {
+    // Morty's bolt, part 1: the body and tail, drawn white to take the weapon's color, with a dark
+    // edge so it reads on any floor. The head is at (32, 7); the tail streams off to the left.
+    key: 'shot-bolt-edge',
+    width: 40,
+    height: 14,
+    draw: (g) => {
+      const pts = [
+        { x: 0, y: 7 },
+        { x: 18, y: 3.4 },
+        { x: 30, y: 1.4 },
+        { x: 35, y: 2 },
+        { x: 38.5, y: 7 },
+        { x: 35, y: 12 },
+        { x: 30, y: 12.6 },
+        { x: 18, y: 10.6 },
+      ];
+      g.fillStyle(0xffffff, 1);
+      g.fillPoints(pts, true);
+      g.lineStyle(1.6, INK, 0.85);
+      g.strokePoints(pts, true);
+    },
+  },
+  {
+    // Morty's bolt, part 2: the white-hot core over the head (untinted).
+    key: 'shot-bolt-core',
+    width: 18,
+    height: 8,
+    draw: (g) => {
+      g.fillStyle(0xffffff, 1);
+      g.fillEllipse(10, 4, 16, 6.4);
+    },
+  },
+  {
+    // A thrown thing's trail: a soft streak, head at the right end (tinted by the weapon).
+    key: 'shot-trail',
+    width: 40,
+    height: 12,
+    draw: (g) => {
+      for (let i = 0; i < 6; i++) {
+        const t = i / 6;
+        g.fillStyle(0xffffff, 0.22 + 0.2 * t);
+        g.fillEllipse(8 + t * 26, 6, 16 + t * 12, 3 + t * 7);
+      }
+    },
+  },
+  {
+    // What every enemy shot sits on: a round, warm, dark-rimmed disc. Never a streak.
+    key: 'shot-hostile',
+    width: 22,
+    height: 22,
+    draw: (g) => {
+      g.fillStyle(0xff4a2e, 1);
+      g.fillCircle(11, 11, 10);
+      g.fillStyle(0xff9a4a, 1);
+      g.fillCircle(11, 11, 6.5);
+      g.lineStyle(2.5, INK, 1);
+      g.strokeCircle(11, 11, 10);
+    },
+  },
+  {
     key: 'shot-paper',
     width: 16,
     height: 16,
@@ -87,16 +147,17 @@ export const ENGINE_SPRITES: SpriteArt[] = [
     },
   },
   {
+    // An enemy's energy shot: a round magenta plasma ball (enemy shots are never streaks).
     key: 'shot-bolt',
-    width: 22,
-    height: 10,
+    width: 16,
+    height: 16,
     draw: (g) => {
-      g.fillStyle(0xff4fd8, 0.35);
-      g.fillEllipse(11, 5, 22, 10);
-      g.fillStyle(0xff7ae3, 1);
-      g.fillEllipse(12, 5, 16, 6);
-      g.fillStyle(0xffffff, 1);
-      g.fillEllipse(14, 5, 8, 3);
+      g.fillStyle(0xff4fd8, 1);
+      g.fillCircle(8, 8, 6.5);
+      g.lineStyle(2, INK, 1);
+      g.strokeCircle(8, 8, 6.5);
+      g.fillStyle(0xffd0f4, 1);
+      g.fillCircle(7, 7, 2.6);
     },
   },
   {
@@ -121,6 +182,19 @@ export const ENGINE_SPRITES: SpriteArt[] = [
     },
   },
   { key: 'fx-dot', width: 8, height: 8, draw: (g) => dot(g, 4, 4, 4, 0xffffff) },
+  {
+    // A spark flying off a hit: a sliver pointing along its path, dark-edged so it shows on any floor.
+    key: 'fx-spark',
+    width: 12,
+    height: 5,
+    draw: (g) => {
+      const pts = [{ x: 0, y: 2.5 }, { x: 5, y: 0.4 }, { x: 12, y: 2.5 }, { x: 5, y: 4.6 }];
+      g.fillStyle(0xffffff, 1);
+      g.fillPoints(pts, true);
+      g.lineStyle(1.2, INK, 0.9);
+      g.strokePoints(pts, true);
+    },
+  },
   // A hand holding a weapon (tinted with the character's skin; the outline stays dark).
   { key: 'held-hand', width: 8, height: 8, draw: (g) => dot(g, 4, 4, 3.4, 0xffffff) },
   {

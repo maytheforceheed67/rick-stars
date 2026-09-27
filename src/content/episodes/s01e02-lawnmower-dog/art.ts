@@ -692,8 +692,10 @@ export const DOG_SHOT_ART: SpriteArt[] = [
     stroke(g, [[7, 15], [7, 5], [13, 5]], 0xe0303a, 2.5);
     stroke(g, [[7, 10], [11, 10]], 0xe0303a, 2.5);
   }),
-  art('shot-bullet', 14, 8, (g) => {
-    wonkyRect(g, 1, 1, 12, 6, { fill: 0xd9a441, seed: 2241, radius: 3, lineWidth: 1.5 });
+  // A fat round dream bullet (enemy shots are never streaks).
+  art('shot-bullet', 12, 12, (g) => {
+    blob(g, 6, 6, 5, 5, { fill: 0xd9a441, seed: 2241, wobble: 0.04, lineWidth: 2 });
+    dot(g, 4.5, 4.5, 1.6, 0xfff0b8);
   }),
   art('shot-laugh', 22, 16, (g) => {
     stroke(g, [[2, 12], [6, 3], [10, 12]], 0xff7ae3, 2.5);

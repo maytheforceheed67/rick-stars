@@ -131,3 +131,39 @@ describe('the trigger', () => {
     expect(shots.length).toBeLessThanOrEqual(Math.ceil(10 / interval) + 1);
   });
 });
+
+describe('bullets you can read at a glance', () => {
+  const sources = import.meta.glob('../src/content/**/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+  /** Every enemy shot kind any brain fires, read straight out of the content code. */
+  const kinds = new Set<string>();
+  for (const text of Object.values(sources)) {
+    for (const call of text.match(/shoot\(\{[^}]*\}/g) ?? []) {
+      const kind = call.match(/kind: '([a-z-]+)'/)?.[1];
+      if (kind) kinds.add(kind);
+    }
+  }
+  // Brains that pass the kind through a helper (toss(api, 'kibble', ...)).
+  for (const text of Object.values(sources)) for (const m of text.matchAll(/toss\(api, '([a-z-]+)'/g)) kinds.add(m[1]);
+
+  it('finds the enemy shot kinds to check', () => {
+    expect(kinds.size).toBeGreaterThanOrEqual(8);
+    expect(kinds.has('bolt')).toBe(true);
+  });
+
+  it('draws every enemy shot round or chunky, never a streak', async () => {
+    const { ENGINE_SPRITES } = await import('../src/engine/art/engineSprites');
+    const art = new Map([...ENGINE_SPRITES, ...reg.sprites.values()].map((a) => [a.key, a]));
+    for (const kind of kinds) {
+      const a = art.get(`shot-${kind}`);
+      expect(a, `shot-${kind}`).toBeDefined();
+      const ratio = Math.max(a!.width, a!.height) / Math.min(a!.width, a!.height);
+      expect(ratio, `shot-${kind} is ${a!.width}x${a!.height}`).toBeLessThanOrEqual(1.5);
+    }
+  });
+
+  it("draws Morty's energy shots as long bolts pointing along their path", async () => {
+    const { ENGINE_SPRITES } = await import('../src/engine/art/engineSprites');
+    const bolt = ENGINE_SPRITES.find((a) => a.key === 'shot-bolt-edge')!;
+    expect(bolt.width / bolt.height).toBeGreaterThanOrEqual(2.5);
+  });
+});
