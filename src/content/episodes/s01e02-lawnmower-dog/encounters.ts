@@ -108,7 +108,8 @@ export const terryChase: EncounterDef = {
           api.setObjective(null);
           api.clearEnemies();
           api.actScene(
-            terryFallsAsleep(exit, () => api.addProp({ art: 'terry-bed', x: exit.x, y: exit.y + 30, solid: true, radius: 40 })),
+            // The bed goes beside the spot where the dream swirl opens, not under it.
+            terryFallsAsleep({ x: exit.x - 150, y: exit.y - 40 }, () => api.addProp({ art: 'terry-bed', x: exit.x - 150, y: exit.y - 10, solid: true, radius: 40 })),
             () => api.completeStage(),
           );
         }
