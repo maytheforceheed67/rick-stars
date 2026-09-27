@@ -116,7 +116,12 @@ describe('floor generation', () => {
         const region = (r: FloorRoom) => regionOf(floor, r, n);
         expect(region(floor.rooms[floor.startId]), where).toBe(0);
         expect(region(floor.rooms[floor.finaleId!]), where).toBe(n - 1);
-        for (let k = 0; k < n; k++) expect(floor.rooms.some((r) => region(r) === k), `${where} region ${k}`).toBe(true);
+        // Every place gets rooms of its own on the way through, not just the finale (which can
+        // look like somewhere else again), and a fight in each one past the first.
+        for (let k = 0; k < n; k++) {
+          expect(floor.rooms.some((r) => region(r) === k && r.kind !== 'finale'), `${where} region ${k}`).toBe(true);
+          if (k > 0) expect(floor.rooms.some((r) => region(r) === k && r.kind === 'combat'), `${where} region ${k} fight`).toBe(true);
+        }
         // Deeper is never an earlier region, so walking on never steps back into the last place.
         for (const r of floor.rooms) {
           for (const nb of Object.values(r.neighbors)) {
@@ -124,8 +129,6 @@ describe('floor generation', () => {
             if (next.depth > r.depth) expect(region(next), where).toBeGreaterThanOrEqual(region(r));
           }
         }
-        // A fight past the first region (Scary Terry shows up after the first clear there).
-        expect(floor.rooms.some((r) => region(r) >= 1 && r.kind === 'combat'), where).toBe(true);
       }
     });
   }

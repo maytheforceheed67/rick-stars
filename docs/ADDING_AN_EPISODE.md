@@ -199,11 +199,12 @@ Morty never pulls a weapon out of nowhere. **Every weapon he uses needs a story 
 
 An act doesn't have to stay in one place.
 
-- **Regions.** `layout.regions: [CENTAUR_DREAM, GIRL_DREAM]` cuts a procedural floor into bands by distance from the start room.
+- **Regions.** `layout.regions: [CENTAUR_DREAM, GIRL_DREAM]` splits a procedural floor into places along the way from the start room to the finale.
   - The act's own biome comes first, then each region in order, so walking deeper crosses from Mrs. Pancakes' club into a centaur's dream and then a little girl's.
+  - Every place gets its own rooms and fights on the way through, including the last one, not just the finale. Side rooms move on with their depth, so the first place isn't most of the floor. `regionOf()` in `src/engine/dungeon/generate.ts` has the rule.
   - Every room looks like its place and plays its music, and a toast names each new place as Morty crosses into it.
   - Mechanics see `room.region` (0 is the act's biome). Scary Terry only turns up past the first region.
-  - The dungeon test checks over 1,000 seeds that every region is reached, in order, from the start to the finale. The validator checks each region's music.
+  - The dungeon test checks over 1,000 seeds that every region has rooms and a fight of its own, in order, from the start to the finale. The validator checks each region's music.
 - **Finale stages somewhere else.** A stage can take a `biome`, as in `{ kind: 'encounter', encounter: 'dog-terry-chase', biome: TERRY_HOUSE }`: the chase ends inside Terry's house.
 - **Rooms somewhere else** in a fixed layout take `biome` on the `FixedRoomDef` (above), and `trips` link rooms across town (see the act skeleton).
 

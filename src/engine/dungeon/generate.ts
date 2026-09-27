@@ -239,12 +239,39 @@ export function buildFixedFloor(layout: FixedLayout): Floor {
 }
 
 /**
- * Which region of a floor a room belongs to (ProceduralLayout.regions): the floor is cut into
- * `regionCount` bands by distance from the start, so walking deeper crosses from one place into
- * the next (the club into the centaur's dream into the little girl's). Region 0 holds the start.
+ * Which region of a floor a room belongs to (ProceduralLayout.regions), so walking deeper crosses
+ * from one place into the next (the club into the centaur's dream into the little girl's). Region
+ * 0 holds the start room and the last region holds the finale. A room is in the later of:
+ * - its stretch of the way from the start to the finale (cut into equal stretches, one per
+ *   region; a room off the way counts from where it branches off), so every region has rooms of
+ *   its own on the way through and not just the finale, which may look like somewhere else again;
+ * - its band of depth, so side rooms far from the start move on too, and the club isn't half
+ *   the floor.
+ * Either way, going deeper never steps back into an earlier region.
  */
 export function regionOf(floor: Floor, room: FloorRoom, regionCount: number): number {
-  if (regionCount <= 1) return 0;
+  if (regionCount <= 1 || floor.finaleId === null) return 0;
+  if (room.id === floor.finaleId) return regionCount - 1;
+  // Breadth-first parents from the start room.
+  const parent = new Map<number, number>([[floor.startId, -1]]);
+  const queue = [floor.startId];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const n of Object.values(floor.rooms[cur].neighbors)) {
+      if (n === undefined || parent.has(n)) continue;
+      parent.set(n, cur);
+      queue.push(n);
+    }
+  }
+  // The way to the finale: the start room up to the room before it.
+  const way: number[] = [];
+  for (let at = parent.get(floor.finaleId) ?? -1; at !== -1; at = parent.get(at) ?? -1) way.unshift(at);
+  // Walk back from this room to where it branches off the way.
+  let at = room.id;
+  while (at !== -1 && !way.includes(at)) at = parent.get(at) ?? -1;
+  const step = Math.max(0, way.indexOf(at));
+  const byWay = Math.floor((step * regionCount) / Math.max(1, way.length));
   const deepest = Math.max(...floor.rooms.map((r) => r.depth));
-  return Math.min(regionCount - 1, Math.floor((room.depth * regionCount) / (deepest + 1)));
+  const byDepth = Math.floor((room.depth * regionCount) / (deepest + 1));
+  return Math.min(regionCount - 1, Math.max(byWay, byDepth));
 }

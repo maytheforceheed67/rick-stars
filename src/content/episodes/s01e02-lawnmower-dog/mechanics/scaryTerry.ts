@@ -85,6 +85,7 @@ export const scaryTerryHunt: MechanicDef = {
         dreamer = null;
         placeDreamer(room);
         const crossed = room.region !== region;
+        const deeper = room.region > region;
         region = room.region;
         if (room.kind === 'finale') {
           // The chase into his house is the finale's own business.
@@ -93,9 +94,10 @@ export const scaryTerryHunt: MechanicDef = {
         }
         if (!met) return;
         if (crossed) {
-          // A new dream: he has to find it first.
+          // Another dream (or back into the last one): he has to find it first.
           arriveAt = Math.max(arriveAt, now() + T.afterDive);
-          api.toast('A new dream. Terry lost the scent... for now.', { color: 0xc9b3ff, seconds: 2.2 });
+          const where = deeper ? 'A new dream.' : 'Back a dream.';
+          api.toast(`${where} Terry lost the scent... for now.`, { color: 0xc9b3ff, seconds: 2.2 });
           return;
         }
         arriveAt = followed ? now() + T.followDelay : Math.max(arriveAt, now() + T.delay);

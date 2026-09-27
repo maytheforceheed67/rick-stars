@@ -971,8 +971,9 @@ export interface ProceduralLayout {
   /** A chain of calm rooms leading out of the start room before the floor branches. */
   calmPrefix?: { count: [min: number, max: number]; templates: ContentId[]; lastTemplate: ContentId };
   /**
-   * Places the floor crosses after the act's own biome, in order, by distance from the start
-   * room (one dream after another). Each room looks like, and plays the music of, its place.
+   * Places the floor crosses after the act's own biome, in order, on the way from the start room
+   * to the finale (one dream after another; see regionOf in dungeon/generate.ts). Each room looks
+   * like, and plays the music of, its place.
    */
   regions?: BiomeDef[];
 }
