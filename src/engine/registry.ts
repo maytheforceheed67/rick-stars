@@ -274,6 +274,7 @@ export function validateRegistry(reg: Registry): string[] {
       // No generic exits between acts: Morty leaves the way the show does (ship, portal, departure).
       if (act !== sequence[sequence.length - 1] && !act.travel && !act.interlude) err(`${where}: needs a way to the next act (ActDef.travel)`);
       if (act.interlude && !act.unarmed) err(`${where}: an interlude is a cutaway with nothing to fight; mark it unarmed`);
+      if (act.interlude && fights) err(`${where}: an interlude is a cutaway with nothing to fight; it can't have an enemy pool or a boss`);
       if (typeof act.arrive === 'object' && !artExists(act.arrive.art)) err(`${where}: arrival art "${act.arrive.art}" doesn't exist`);
       if (act.layout.kind === 'procedural') {
         for (const b of act.layout.regions ?? []) if (!reg.music.has(b.music)) err(`${where}: region "${b.id}" music "${b.music}" doesn't exist`);

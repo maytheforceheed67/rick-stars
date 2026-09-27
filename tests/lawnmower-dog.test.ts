@@ -6,7 +6,7 @@ import { Inventory } from '../src/engine/effects/inventory';
 import { computeStats } from '../src/engine/effects/stats';
 import { compareEpisodes, nextUp } from '../src/engine/episodes';
 import { itemPoolFor } from '../src/engine/pools';
-import { actEnemies, episodeActs } from '../src/engine/registry';
+import { actEnemies, episodeActs, validateRegistry } from '../src/engine/registry';
 import type { ContentMeta, EnemyRef, EpisodeDef, GameCtx, HitInfo, ItemDef } from '../src/engine/types';
 
 const reg = createRegistry();
@@ -41,6 +41,20 @@ describe('Lawnmower Dog: the story', () => {
       // Each one ends on a story beat, not a fight.
       expect(a.finale.every((f) => f.kind === 'encounter'), a.id).toBe(true);
     }
+  });
+
+  it("won't let a cutaway pick a fight", () => {
+    const i = dog.acts.findIndex((a) => a.id === 'dog-meanwhile-snuffles');
+    const saved = dog.acts[i];
+    try {
+      dog.acts[i] = { ...saved, enemyPool: [{ id: 'dream-soldier', weight: 1 }] };
+      expect(validateRegistry(reg).some((e) => e.includes("can't have an enemy pool"))).toBe(true);
+      dog.acts[i] = { ...saved, unarmed: false };
+      expect(validateRegistry(reg).some((e) => e.includes('mark it unarmed'))).toBe(true);
+    } finally {
+      dog.acts[i] = saved;
+    }
+    expect(validateRegistry(reg)).toEqual([]);
   });
 
   it('hands Morty a weapon each time the story gives him one, and takes it away for the quiet parts', () => {

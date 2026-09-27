@@ -2,17 +2,20 @@
 
 Adding an episode means adding a content folder and pointing one line of `src/content/registry.ts` at it. The engine doesn't need to change: episodes bring their own enemies, items, rooms, mechanics, cutscenes, dialogue, art and music.
 
-This guide uses S01E02 "Lawnmower Dog" as the example. The Pilot (`src/content/episodes/s01e01-pilot/`) is the reference implementation: when in doubt, copy what it does.
+This guide uses S01E03 "Anatomy Park", the next episode on the Season Map, as its running example. Two finished episodes are the reference implementations. When in doubt, copy what they do:
+
+- the Pilot (`src/content/episodes/s01e01-pilot/`): procedural acts, bosses, a calm-prefix stealth act, fixed-layout prologue and epilogue;
+- Lawnmower Dog (`src/content/episodes/s01e02-lawnmower-dog/`): acts that cross from one place into the next, cutaways to Jerry, an enemy that can't be killed, a story trip across town, and mechanics reused from the Pilot.
 
 ## The steps
 
-1. **Create the folder** `src/content/episodes/s01e02-lawnmower-dog/`. Use the same file layout as the Pilot (see [What goes in each file](#what-goes-in-each-file)).
-2. **Tag every definition** with `firstAppears: 'S01E02'`, plus `canon: true` if it's from the show or `canon: false` if you invented it (see [Canon gating](#canon-gating)).
-3. **Put tuning numbers in `src/content/balance.ts`**, in a new block next to `PILOT`:
+1. **Create the folder** `src/content/episodes/s01e03-anatomy-park/`. Use the same file layout as the others (see [What goes in each file](#what-goes-in-each-file)).
+2. **Tag every definition** with `firstAppears: 'S01E03'`, plus `canon: true` if it's from the show or `canon: false` if you invented it (see [Canon gating](#canon-gating)).
+3. **Put tuning numbers in `src/content/balance.ts`**, in a new block next to `PILOT` and `LAWNMOWER_DOG`:
    ```ts
-   export const LAWNMOWER_DOG = {
-     enemies: { 'dream-crawler': { hp: 12, speed: 110 } },
-     snuffles: { hp: 260, speed: 120 },
+   export const ANATOMY_PARK = {
+     enemies: { 'germ-tourist': { hp: 12, speed: 110 } },
+     pancreasPirate: { hp: 260, speed: 120 },
      // mechanic tuning, timers, ...
    };
    ```
@@ -20,18 +23,19 @@ This guide uses S01E02 "Lawnmower Dog" as the example. The Pilot (`src/content/e
 4. **Export the episode** from `episode.ts` as one `EpisodeDef` (see the skeleton below).
 5. **List it** in `src/content/registry.ts`. That file is the only list of episodes:
    ```ts
-   import { lawnmowerDog } from './episodes/s01e02-lawnmower-dog/episode';
+   import { anatomyPark } from './episodes/s01e03-anatomy-park/episode';
    // ...
-   { id: 'S01E02', season: 1, number: 2, title: 'Lawnmower Dog', def: lawnmowerDog },
+   { id: 'S01E03', season: 1, number: 3, title: 'Anatomy Park', def: anatomyPark },
    ```
-   With a `def`, the Season Map makes the node playable, and once the Pilot is cleared it's "next up".
-6. **Update the one test that pins what's playable.** In `tests/content.test.ts`, "lists all of Season 1…" expects `['S01E01']`; make it `['S01E01', 'S01E02']`. Everything else picks up the new episode automatically:
+   With a `def`, the Season Map makes the node playable, and once Lawnmower Dog is cleared it's "next up".
+6. **Update the one test that pins what's playable.** In `tests/content.test.ts`, "lists all of Season 1…" expects `['S01E01', 'S01E02']`; make it `['S01E01', 'S01E02', 'S01E03']`. Everything else picks up the new episode automatically:
    - registry validation, including canon gating and templates;
-   - the 1,000-seed dungeon test, which runs for every procedural act;
+   - the 1,000-seed dungeon test, which runs for every procedural act (and checks regions, if the act has them);
    - the canon-gating pool test;
-   - the story-weapon checks, the hits-to-kill bands and the boss-fight length.
+   - the story-weapon checks, the hits-to-kill bands and the boss-fight length;
+   - the synergy and transformation checks.
 
-   Add episode-specific tests if the episode has new rules worth pinning down.
+   Add a test file for the episode's own rules: the act order, its weapon beats, canon gating for its characters, its unlocks and what its signature items do. `tests/lawnmower-dog.test.ts` is the model.
 7. **Check it.**
    - Run `npm test`, `npm run typecheck` and `npm run build`.
    - Then play it with `npm run dev` and http://localhost:5173/?debug=1. The debug panel jumps to any act or room, spawns any enemy or item, and has god mode.
@@ -41,7 +45,7 @@ If something truly needs new engine support (a new kind of hook, a new tile type
 
 ## What goes in each file
 
-Split things however reads best; the only fixed point is that `episode.ts` exports the `EpisodeDef`. The Pilot's layout:
+Split things however reads best; the only fixed point is that `episode.ts` exports the `EpisodeDef`. The Pilot's layout (Lawnmower Dog keeps its statuses in `items.ts` and has no `icons.ts`):
 
 | File | Contents |
 |---|---|
@@ -72,16 +76,16 @@ Shared cast and content live in `src/content/shared/`: Morty, Rick, Jerry, Beth,
 ```ts
 import type { EpisodeDef } from '../../../engine/types';
 
-export const lawnmowerDog: EpisodeDef = {
-  id: 'S01E02',
-  firstAppears: 'S01E02',
+export const anatomyPark: EpisodeDef = {
+  id: 'S01E03',
+  firstAppears: 'S01E03',
   canon: true,
   season: 1,
-  number: 2,
-  title: 'Lawnmower Dog',
+  number: 3,
+  title: 'Anatomy Park',
   synopsis: 'One sentence for the Season Map.',
   prologue: PROLOGUE,                 // optional; skippable after the first clear
-  acts: [ACT_1, ACT_2, ACT_3],
+  acts: [ACT_1, ACT_2, ACT_3],         // cutaway (interlude) acts go in this list too, in story order
   epilogue: EPILOGUE,                 // optional
   unlocksOnClear: ['some-locked-item'],
   content: {
@@ -93,43 +97,47 @@ export const lawnmowerDog: EpisodeDef = {
 };
 ```
 
-`unlocksOnClear` ids should be items marked `locked: true`. They join every pool (subject to canon gating) after the first clear.
+`unlocksOnClear` ids should be items marked `locked: true`. They join every pool (subject to canon gating) after the first clear. So an unlock that first appears in Anatomy Park never shows up in the Pilot or Lawnmower Dog.
 
 ### A procedural act (`acts.ts`)
 
 ```ts
 export const ACT_1: ActDef = {
-  id: 'dog-suburbs',                     // prefix act ids with a short episode slug
-  name: 'Smith Backyard',
+  id: 'park-gates',                      // prefix act ids with a short episode slug
+  name: 'The Park Gates',
   subtitle: 'Act 1',
-  playable: 'morty',                     // later B-plots can hand control to 'summer', 'jerry'...
-  biome: SUBURB_BIOME,                   // palette, floor pattern, music track id
+  playable: 'morty',                     // cutaways hand control to someone else (see "Cutaways" below)
+  biome: GATES_BIOME,                    // palette, floor pattern, drawing style, music track id
   layout: {
     kind: 'procedural',
     roomCount: [8, 11],                  // rooms besides the start room and any calm prefix; the act must total 8-12
-    templates: SUBURB_COMBAT.map((t) => t.id), // at least 12
-    startTemplate: 'dog-start',
-    treasureTemplate: 'dog-treasure',
-    shopTemplate: 'dog-shop',
+    templates: GATES_COMBAT.map((t) => t.id), // at least 12
+    startTemplate: 'park-start',
+    treasureTemplate: 'park-treasure',
+    shopTemplate: 'park-shop',
     // calmPrefix: { count: [3, 4], templates: [...], lastTemplate: '...' } // non-combat run-up, like the customs queues
+    // regions: [RIDES_BIOME, LIVER_BIOME]  // walk from one place into the next (see "Places that change" below)
   },
-  enemyPool: [w('dream-crawler', 3)],    // { id, weight }
+  enemyPool: [w('germ-tourist', 3)],     // { id, weight }
   itemPool: [w('freeze-ray-mod', 1)],    // earlier episodes' items are fine
   eliteChance: 0.12,
-  shop: { keeperArt: 'dog-shopkeeper', name: 'Dog Treat Stand', alwaysStocks: ['some-consumable'] },
-  specialRoom: 'dog-special',
-  finale: [{ kind: 'boss', boss: 'snuffles', template: 'dog-boss' }], // or { kind: 'encounter', encounter: '...' }; more stages chain
+  shop: { keeperArt: 'park-vendor', name: 'Snack Kiosk', alwaysStocks: ['some-consumable'] },
+  specialRoom: 'park-special',
+  finale: [{ kind: 'boss', boss: 'pancreas-pirate', template: 'park-boss' }], // or { kind: 'encounter', encounter: '...' }; more stages chain
   // Where Morty's weapon comes from in this act; required when the act has enemies.
   weapon: { item: 'ricks-spare-ray-gun', when: 'start', from: 'rick', line: "Here, Morty, catch! Point the green end at 'em." },
-  rick: { gadget: 'freeze-ray', entrance: 'portal' }, // what Q does; add a GadgetDef for a new one
+  rick: { gadget: 'freeze-ray', entrance: 'portal' }, // what Q does; add a GadgetDef for a new one; `follows` brings him along
   mechanics: [],                         // MechanicDef ids
   startStatuses: [],
-  intro: ['dog-intro'],                  // cutscene ids
-  outro: ['dog-outro'],
+  arrive: 'portal',                      // or { by: 'portal', art: 'some-swirl' } for a portal that looks different
+  opening: gatesOpening,                 // an in-engine scene in the first room (see "In-engine scenes")
+  travel: { by: 'portal', label: 'Go deeper' }, // how Morty leaves; every act but the last needs one
+  intro: ['park-intro'],                 // cutscene ids
+  outro: ['park-outro'],
 };
 ```
 
-The prologue and epilogue use `layout: { kind: 'fixed', start, rooms: [{ x, y, kind, template, script }] }` instead. Rooms next to each other on that grid get doors between them; see `PROLOGUE` in the Pilot. A quiet act with nothing to fight (the Pilot's epilogue at home) sets `unarmed: true`, and Morty puts his weapon away.
+The prologue and epilogue use `layout: { kind: 'fixed', start, rooms: [{ x, y, kind, template, script, biome? }] }` instead. Rooms next to each other on that grid get doors between them; see `PROLOGUE` in either episode. Rooms that aren't next to each other can still be linked by a story trip with `trips: [{ from: { x, y }, to: { x, y } }]`. In Lawnmower Dog, a room script in the Smith garage calls `api.travelTo(to, 'ship', ship)` to fly across town to the Goldenfolds' house. The fixed-floor test counts trips when it checks every room can be reached. A quiet act with nothing to fight (the Pilot's epilogue at home) sets `unarmed: true`, and Morty puts his weapon away.
 
 ## Weapons need a story reason
 
@@ -148,6 +156,16 @@ Morty never pulls a weapon out of nowhere. **Every weapon he uses needs a story 
   | Dimension 35-C | Rick's spare ray gun | Rick tosses it over; the critters bite |
   | Customs | Rick's own ray gun | Canon: Rick hands it over when the cover is blown |
 
+  Lawnmower Dog, where most of the fighting happens in dreams:
+
+  | Act | Weapon | Why |
+  |---|---|---|
+  | Prologue, both Jerry cutaways | None (`unarmed`) | A break-in, and then Jerry |
+  | Goldenfold's dream | Imagined ray gun | Morty realizes he's dreaming and makes one up |
+  | Dreams within dreams | Rubber duck launcher | Deeper dream, weirder imagination |
+  | Scary Terry's dream | Laser cat | By now, anything goes |
+  | Snowball's world | Tennis ball launcher | Rick smuggles it in: dogs can't resist tennis balls |
+
 - **Weapons are items** of `kind: 'weapon'`, `rarity: 'story'`, `noPool: true`, with a `WeaponSpec`. Beyond damage, fire rate, extra projectiles and spread, it can set:
   - `style: 'thrown'` (no muzzle flash, drawn untinted) or the default `'energy'`;
   - `shot` (a sprite key, or a list to cycle through: the Pilot's junk pile) and `spin`;
@@ -162,20 +180,52 @@ Morty never pulls a weapon out of nowhere. **Every weapon he uses needs a story 
   - `by: 'portal'`: a green portal from Rick's portal gun;
   - `by: 'departure'`: an official departure portal (Customs).
 
-  `arrive` says how Morty shows up at the start of an act (stepping out of a portal, the ship landing). An act with several finale stages can dress the way between them with `stageExit: { art, label }` (the Pilot's security gate into the departure hall).
+  `arrive` says how Morty shows up at the start of an act (stepping out of a portal, the ship landing). A portal can look like something else: `travel.art` and `arrive: { by: 'portal', art }` swap in any sprite, and Lawnmower Dog uses a purple dream swirl to go one dream deeper. An act with several finale stages can dress the way between them with `stageExit: { art, label }` (the Pilot's security gate into the departure hall).
 - **Rick comes along when the episode has him along.** `rick.follows` is a set of short lines (`enter`, `clear`, `hurt`, `item`, `idle`). With it, Rick walks with Morty through the act, comments now and then (burps included), can't be hurt and doesn't block shots. Calling him with a full meter is him stepping in.
 - **Act out the big beats in the room.** `ActDef.opening(api)` returns scene steps (see [In-engine scenes](#in-engine-scenes)) played in the first room right after Morty arrives: Rick walking out of the portal to explain Dimension 35-C and tossing Morty his spare gun. Put a story weapon's handover in a scene with the `{ kind: 'weapon' }` step. Comic cutscenes (`intro`, `outro`) are for quick recaps; keep them short.
 - **Make places look like themselves.** A biome's `style` picks how walls, blocks and doors are drawn:
 
   | Field | Options |
   |---|---|
-  | `walls` (walls and tall `#` blocks) | `bricks`, `lockers`, `hills`, `panels`, `house` |
-  | `blocks` (low `=` blocks) | `crate`, `desk`, `rock`, `counter`, `furniture` |
+  | `walls` (walls and tall `#` blocks) | `bricks`, `lockers`, `hills`, `panels`, `house`, `cabin` (a plane: overhead bins and oval windows) |
+  | `blocks` (low `=` blocks) | `crate`, `desk`, `rock`, `counter`, `furniture`, `seat`, `toy`, `hedge` |
   | `doors` (between rooms) | `plain`, `classroom`, `arch`, `gate`, `house` |
 
-  A room in a fixed layout can look like somewhere else with `biome` on its `FixedRoomDef` (the inside of Rick's ship in the Pilot's prologue).
+  A room in a fixed layout can look like somewhere else with `biome` on its `FixedRoomDef`. Examples are the inside of Rick's ship in the Pilot's prologue, the Smith garage, and the dog-ruled streets outside Snowball's palace.
 - **Every run opens with a title card** built from the episode's season, number and title. You don't need to add anything.
 - **The Garage is a room Morty walks around.** The workbench sells upgrades, the closet has shirts, the TV has stats and settings, and Rick's ship opens the Season Map as the ship's navigation screen. Episodes don't need to touch it.
+
+### Places that change
+
+An act doesn't have to stay in one place.
+
+- **Regions.** `layout.regions: [CENTAUR_DREAM, GIRL_DREAM]` cuts a procedural floor into bands by distance from the start room.
+  - The act's own biome comes first, then each region in order, so walking deeper crosses from Mrs. Pancakes' club into a centaur's dream and then a little girl's.
+  - Every room looks like its place and plays its music, and a toast names each new place as Morty crosses into it.
+  - Mechanics see `room.region` (0 is the act's biome). Scary Terry only turns up past the first region.
+  - The dungeon test checks over 1,000 seeds that every region is reached, in order, from the start to the finale. The validator checks each region's music.
+- **Finale stages somewhere else.** A stage can take a `biome`, as in `{ kind: 'encounter', encounter: 'dog-terry-chase', biome: TERRY_HOUSE }`: the chase ends inside Terry's house.
+- **Rooms somewhere else** in a fixed layout take `biome` on the `FixedRoomDef` (above), and `trips` link rooms across town (see the act skeleton).
+
+### Cutaways
+
+A "Meanwhile" act that cuts to another character sets `interlude: true`. For example, Jerry chasing a Snuffles who's getting smarter:
+
+```ts
+export const MEANWHILE: ActDef = {
+  id: 'dog-meanwhile-snuffles', name: 'Meanwhile: Good Boy?', subtitle: 'Meanwhile',
+  playable: 'jerry', interlude: true, unarmed: true,
+  biome: SMITH_DAY, layout: { kind: 'fixed', start: { x: 0, y: 0 }, rooms: [/* ... */] },
+  enemyPool: [], itemPool: [], eliteChance: 0,
+  finale: [{ kind: 'encounter', encounter: 'dog-snuffles-smarter' }], // ends with api.endAct()
+  rick: RICK, mechanics: [],
+};
+```
+
+- **Needs no `travel`.** It cuts back to the story instead.
+- **The validator refuses a cutaway that's armed or has enemies to fight.**
+- **Sitting it out.** Morty's companions, looks, orbiting junk and Rick calls sit it out, and come back afterwards.
+- **Reuse.** A cutaway can reuse a mechanic from an earlier episode. Jerry's second cutaway runs the Pilot's suspicion meter with dog troopers.
 
 ## Rooms (`rooms.ts`)
 
@@ -204,10 +254,10 @@ Rules the validator enforces:
 ## Enemies and bosses
 
 ```ts
-export const dreamCrawler: EnemyDef = {
-  id: 'dream-crawler', name: 'Dream Crawler', firstAppears: 'S01E02', canon: false,
-  ...LAWNMOWER_DOG.enemies['dream-crawler'],   // hp, speed
-  radius: 14, contactDamage: 1, art: ART.dreamCrawler,
+export const germTourist: EnemyDef = {
+  id: 'germ-tourist', name: 'Germ Tourist', firstAppears: 'S01E03', canon: false,
+  ...ANATOMY_PARK.enemies['germ-tourist'],     // hp, speed
+  radius: 14, contactDamage: 1, art: ART.germTourist,
   elite: { hpMult: 1.7, scale: 1.2, params: { burst: 3 } },
   brain: function* (api) {
     while (true) {
@@ -230,8 +280,14 @@ export const dreamCrawler: EnemyDef = {
 - **Bosses** add `boss: { title, phases?, reward?, onDefeat?, defeatCutscene?, music? }`, and an act's finale stage points at them. More options:
   - `character` names the character the boss is, so scenes and `ctx.say()` talk from his head;
   - `objective` is the line shown while the fight lasts;
-  - `dazed(api, boss, done)` means the boss isn't killed. At 0 HP he's left dazed and harmless while the hook plays his ending, usually an in-engine scene. Frank works this way: Morty wears him out with dodgeballs, then Rick walks in and freezes him.
+  - `dazed(api, boss, done)` means the boss isn't killed. At 0 HP he's left dazed and harmless while the hook plays his ending, usually an in-engine scene. Frank works this way: Morty wears him out with dodgeballs, then Rick walks in and freezes him. So does Snowball: his war suit powers down (`boss.setAlpha(0.25)` in a `do` step), and Rick talks him down.
 - **Summons.** List what an enemy brings into the room under `spawns` (its brood, its backup). The validator checks the ids, and the hits-to-kill test covers the summons too.
+- **Enemies that can't be killed.** `stalker: { staggerHits, staggerSeconds }` makes an enemy like Scary Terry:
+  - every hit shoves him, and every `staggerHits` hits leave him dizzy for `staggerSeconds`;
+  - he never counts toward clearing a room, and he's left out of the hits-to-kill test;
+  - he can't also be a boss or a hazard.
+
+  Bring him in from a mechanic, and give the player a way to shake him. In Lawnmower Dog, diving into a sleeper's dream (E) makes him lose the scent for a while (`mechanics/scaryTerry.ts`).
 - **Enemy shots** use `kind` to pick the texture `shot-<kind>`:
   - built-in kinds: `orb`, `paper`, `ball`, `book`, `spore`, `bolt`, `stamp`, `ice`;
   - to add a new look, register a sprite keyed `shot-<kind>` in `content.sprites`.
@@ -239,7 +295,7 @@ export const dreamCrawler: EnemyDef = {
 ## Items, synergies, transformations and statuses
 
 ```ts
-{ id: 'squeaky-bone', name: 'Squeaky Bone', firstAppears: 'S01E02', canon: false,
+{ id: 'kidney-stone', name: 'Kidney Stone', firstAppears: 'S01E03', canon: false,
   blurb: 'One funny line, shown on pickup.',
   effect: 'Shots bounce off an enemy toward the next one.', // one plain line: exactly what it does
   tags: ['shots'],                                        // what it changes (see below)
@@ -301,18 +357,18 @@ export const dreamCrawler: EnemyDef = {
 An episode-specific system is a `MechanicDef` that the acts list by id:
 
 ```ts
-export const dreamDepth: MechanicDef = {
-  id: 'dream-depth', name: 'Dream Depth', firstAppears: 'S01E02', canon: false,
+export const immuneResponse: MechanicDef = {
+  id: 'immune-response', name: 'Immune Response', firstAppears: 'S01E03', canon: false,
   help: 'One line for the pause screen.',
   create(api) {
-    let depth = 0;
+    let alarm = 0;
     return {
       onActStart() {}, onRoomEnter(room) {}, update(dt) {}, onRoomClear(room) {}, onActEnd() {},
       onAction() {},                 // the F key
       onPlayerEvent(e) {},           // fire, dash, fall, hurt
       allowsTile(tile) { return undefined; }, // let the player stand on cliffs etc.
       onFall() { return false; },    // take over what a fall does
-      hud: () => ({ label: 'Dream depth', value: depth / 3, color: 0x97ce4c }),
+      hud: () => ({ label: 'Immune response', value: alarm / 100, color: 0x97ce4c }),
     };
   },
 };
@@ -324,7 +380,20 @@ export const dreamDepth: MechanicDef = {
 - `convertRooms(from, to)`, which is how Customs turns its calm rooms into combat rooms;
 - `giveActWeapon()`, which hands over the act's story weapon.
 
-See `mechanics/grapplingShoes.ts` and `mechanics/suspicion.ts`.
+The game context also has:
+- `tilt(radians, seconds)`, which banks the camera (the plane in Goldenfold's dream);
+- `pushEnemies(x, y, radius, force)`, which shoves enemies away from a point;
+- `removeItem(id)`, which takes an item away (Scary Terry heading home after the climb).
+
+**Mechanics can be factories.** `createSuspicion(setup)` in the Pilot's `mechanics/suspicion.ts` builds a suspicion meter. You give it:
+- who watches;
+- the scanner and checkpoint art;
+- the lines;
+- what happens when the cover is blown.
+
+Customs and Lawnmower Dog's dog patrols (`mechanics/dogPatrols.ts`) are each one call to it. If a mechanic from an earlier episode almost fits, make it a factory rather than copying it.
+
+See `mechanics/grapplingShoes.ts` and `mechanics/suspicion.ts` in the Pilot, and `mechanics/` in Lawnmower Dog (creaky floors, dream control, Scary Terry, Terry's confidence, dog patrols).
 
 ## Encounters, special rooms and scripted rooms
 
@@ -359,7 +428,9 @@ Big story beats should play out in the room, not only as comic panels. `api.actS
 
 - **Who.** A `who` is a character id with a world sprite. The act's playable character is the player himself.
 - **Spots.** A spot is `{ x, y }`, or `{ near: 'rick', side?, gap? }` to stand next to someone.
-- **Examples.** The Pilot's `scenes.ts` (the neutrino-bomb reveal in the ship, the 35-C arrival, the Customs desk and the cover being blown), and Frank's `dazed` hook in `bosses.ts`.
+- **Examples.**
+  - The Pilot's `scenes.ts`: the neutrino-bomb reveal in the ship, the 35-C arrival, the Customs desk and the cover being blown. Also Frank's `dazed` hook in `bosses.ts`.
+  - Lawnmower Dog's `scenes.ts`: the helmet, the dream inceptor, Goldenfold turning the dream on them, Terry falling asleep, and Snowball relenting.
 - **Skipping.** Every `do`, `weapon` and `pose` step still runs, so a skipped scene ends in the same place.
 
 A script returns hooks: `onEnter(firstTime)`, `update(dt)`, `onExit()`, `onEnemiesCleared()`, `onBossDefeated()`. The Pilot's `encounters.ts` covers most patterns: a timed puzzle, waves, an escape run and a quiz.
@@ -388,8 +459,8 @@ A script returns hooks: `onEnter(firstTime)`, `update(dt)`, `onExit()`, `onEnemi
 
 - **Tag everything.** Every definition carries `firstAppears` and `canon`.
 - **An episode can only reference what has appeared by then.** The validator fails the build's tests otherwise, and item pools apply the same rule to unlocked items.
-- **Earlier content is fair game.** S01E02 can put Pilot items in its pools, fight Pilot enemies, reuse school templates, or bring back Mr. Goldenfold (`firstAppears: 'S01E01'`).
-- **New content from the episode itself** gets `firstAppears: 'S01E02'`, `canon: true`. For Lawnmower Dog that includes Snuffles/Snowball and Scary Terry.
-- **Invented content** gets `firstAppears: 'S01E02'`, `canon: false`.
+- **Earlier content is fair game.** Lawnmower Dog brings back Mr. Goldenfold (`firstAppears: 'S01E01'`). Scary Terry's dream reuses the Pilot's school templates and school enemies, and the dog patrols reuse the Pilot's suspicion meter. Anatomy Park can do the same with anything from S01E01 or S01E02.
+- **New content from the episode itself** gets `firstAppears: 'S01E03'`, `canon: true`. For Lawnmower Dog, that meant Snuffles/Snowball, the helmet, Scary Terry, Mrs. Pancakes, the centaur, the little girl and the dream inceptor.
+- **Invented content** gets `firstAppears: 'S01E03'`, `canon: false`.
 - **Nothing later in the show can be used yet.** For example, Meeseeks don't show up until S01E05.
-- **Ids are unique** within each category, and an item and an enemy can't share one. Prefix episode-scoped ids with a short slug (`dog-…`, like the Pilot's `pilot-…`), especially acts, encounters, special rooms, cutscenes, scripts and templates.
+- **Ids are unique** within each category, and an item and an enemy can't share one. Prefix episode-scoped ids with a short slug (`park-…`, like the Pilot's `pilot-…` and Lawnmower Dog's `dog-…`), especially acts, encounters, special rooms, cutscenes, scripts and templates.
