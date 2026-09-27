@@ -400,6 +400,8 @@ export interface GameCtx {
   stats(): StatBlock;
   hasItem(id: ContentId): boolean;
   giveItem(id: ContentId, opts?: { silent?: boolean }): void;
+  /** Takes an item away (a story buddy heading home). */
+  removeItem(id: ContentId): void;
   applyStatus(id: ContentId): void;
   removeStatus(id: ContentId): void;
   hasStatus(id: ContentId): boolean;
@@ -433,6 +435,8 @@ export interface GameCtx {
   clearEnemyShots(): number;
   /** Shoves enemies within `radius` of (x, y) away from it. */
   pushEnemies(x: number, y: number, radius: number, force: number): void;
+  /** Tilts the camera by `radians` for `seconds`, then levels it (a plane banking). */
+  tilt(radians: number, seconds: number): void;
 }
 
 export type VfxSpec =
@@ -604,6 +608,12 @@ export interface EnemyDef extends ContentMeta {
   nameplate?(ctx: GameCtx): string | null;
   boss?: BossInfo;
   /**
+   * Can't be killed (Scary Terry): hits knock him back, and every `staggerHits` hits leave him
+   * dizzy for `staggerSeconds`. He never counts toward clearing a room, so he can't keep its
+   * doors shut; the episode decides how to shake him.
+   */
+  stalker?: { staggerHits: number; staggerSeconds: number };
+  /**
    * Makes this a room hazard (a bursting locker, a scanner): it can't be hurt or targeted,
    * doesn't count toward clearing the room, and goes quiet once the room is cleared.
    */
@@ -654,6 +664,8 @@ export interface RoomInfo {
   readonly firstVisit: boolean;
   /** Position within an act's calm prefix (0-based), if any. */
   readonly prefixIndex?: number;
+  /** Which of the act's places this room is in (ProceduralLayout.regions; 0 = the act's biome). */
+  readonly region: number;
   readonly isLastPrefix: boolean;
   readonly widthPx: number;
   readonly heightPx: number;
@@ -928,11 +940,11 @@ export interface BiomeDef {
 export interface BiomeStyle {
   /**
    * The room's walls, and the tall blocks ('#') inside it: plain bricks, school lockers, lumpy
-   * pastel hills, grey metal panels, or house wallpaper.
+   * pastel hills, grey metal panels, house wallpaper, or a plane cabin with windows.
    */
-  walls?: 'bricks' | 'lockers' | 'hills' | 'panels' | 'house';
-  /** Low blocks ('='): crates, school desks, rocks, counters, furniture. */
-  blocks?: 'crate' | 'desk' | 'rock' | 'counter' | 'furniture';
+  walls?: 'bricks' | 'lockers' | 'hills' | 'panels' | 'house' | 'cabin';
+  /** Low blocks ('='): crates, school desks, rocks, counters, furniture, plane seats, toy blocks, hedges. */
+  blocks?: 'crate' | 'desk' | 'rock' | 'counter' | 'furniture' | 'seat' | 'toy' | 'hedge';
   /** Doors between rooms: plain, classroom doors, natural archways, security gates, house doors. */
   doors?: 'plain' | 'classroom' | 'arch' | 'gate' | 'house';
 }
@@ -951,6 +963,11 @@ export interface ProceduralLayout {
   shopTemplate: ContentId;
   /** A chain of calm rooms leading out of the start room before the floor branches. */
   calmPrefix?: { count: [min: number, max: number]; templates: ContentId[]; lastTemplate: ContentId };
+  /**
+   * Places the floor crosses after the act's own biome, in order, by distance from the start
+   * room (one dream after another). Each room looks like, and plays the music of, its place.
+   */
+  regions?: BiomeDef[];
 }
 
 export interface FixedRoomDef {
@@ -1050,6 +1067,11 @@ export interface ActDef {
   weapon?: StoryWeapon;
   /** Morty puts his weapon away for this act (a quiet epilogue at home). */
   unarmed?: boolean;
+  /**
+   * A "Meanwhile" cutaway to another character (Jerry at home). It cuts back to the story instead
+   * of traveling, and Morty's buddies, looks and Rick calls sit it out.
+   */
+  interlude?: boolean;
   /** Statuses applied when the act starts. */
   startStatuses?: ContentId[];
   /** Comic-panel cutscenes before the act: quick recaps, always skippable. */
@@ -1061,12 +1083,12 @@ export interface ActDef {
   opening?(api: RoomScriptApi): SceneStep[];
   outro?: ContentId[];
   /**
-   * How Morty leaves once the finale is done. Every act but an episode's last needs one: there
-   * are no generic exit doors between acts.
+   * How Morty leaves once the finale is done. Every act but an episode's last (and interludes,
+   * which cut away) needs one: there are no generic exit doors between acts.
    */
   travel?: TravelSpec;
-  /** How he shows up at the start (stepping out of a portal, the ship landing). */
-  arrive?: TravelKind;
+  /** How he shows up at the start (stepping out of a portal, the ship landing), and its art. */
+  arrive?: TravelKind | { by: TravelKind; art: string };
   /** The way into the next finale stage when there are several (a security gate). */
   stageExit?: { art: string; label: string };
   music?: string;

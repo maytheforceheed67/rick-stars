@@ -78,6 +78,28 @@ export class Inventory {
     }
   }
 
+  /** Takes an item away (a story buddy going home). Returns whether Morty had it. */
+  remove(id: ContentId): boolean {
+    if (this.weapon === id) {
+      this.weapon = null;
+      return true;
+    }
+    const i = this.passives.indexOf(id);
+    if (i >= 0) {
+      this.passives.splice(i, 1);
+      return true;
+    }
+    if (this.active?.id === id) {
+      this.active = null;
+      return true;
+    }
+    if (this.consumable === id) {
+      this.consumable = null;
+      return true;
+    }
+    return false;
+  }
+
   /** Adds charge after a room clear. Returns true if the active item just became ready. */
   chargeActive(rooms = 1): boolean {
     if (!this.active || this.active.charge >= this.active.max) return false;

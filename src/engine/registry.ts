@@ -272,7 +272,12 @@ export function validateRegistry(reg: Registry): string[] {
         err(`${where}: has enemies but no story weapon (ActDef.weapon)`);
       }
       // No generic exits between acts: Morty leaves the way the show does (ship, portal, departure).
-      if (act !== sequence[sequence.length - 1] && !act.travel) err(`${where}: needs a way to the next act (ActDef.travel)`);
+      if (act !== sequence[sequence.length - 1] && !act.travel && !act.interlude) err(`${where}: needs a way to the next act (ActDef.travel)`);
+      if (act.interlude && !act.unarmed) err(`${where}: an interlude is a cutaway with nothing to fight; mark it unarmed`);
+      if (typeof act.arrive === 'object' && !artExists(act.arrive.art)) err(`${where}: arrival art "${act.arrive.art}" doesn't exist`);
+      if (act.layout.kind === 'procedural') {
+        for (const b of act.layout.regions ?? []) if (!reg.music.has(b.music)) err(`${where}: region "${b.id}" music "${b.music}" doesn't exist`);
+      }
       if (act.travel?.art && !artExists(act.travel.art)) err(`${where}: travel art "${act.travel.art}" doesn't exist`);
       if (act.stageExit && !artExists(act.stageExit.art)) err(`${where}: stage exit art "${act.stageExit.art}" doesn't exist`);
       if (act.travel && !act.travel.label.trim()) err(`${where}: travel needs a label`);
@@ -379,6 +384,8 @@ export function validateRegistry(reg: Registry): string[] {
   for (const e of reg.enemies.values()) {
     if (!(e.hp > 0) || !(e.radius > 0)) err(`enemy "${e.id}" needs positive hp and radius`);
     for (const id of e.spawns ?? []) if (!reg.enemies.has(id)) err(`enemy "${e.id}" spawns missing enemy "${id}"`);
+    if (e.stalker && (e.boss || e.hazard)) err(`enemy "${e.id}": a stalker can't also be a boss or a hazard`);
+    if (e.stalker && !(e.stalker.staggerHits >= 1 && e.stalker.staggerSeconds > 0)) err(`enemy "${e.id}": stalker needs staggerHits >= 1 and staggerSeconds > 0`);
   }
   for (const p of reg.pickups.values()) if (!reg.sprites.has(p.art)) err(`pickup "${p.id}" art "${p.art}" doesn't exist`);
   for (const sr of reg.specialRooms.values()) {

@@ -495,6 +495,79 @@ export class RoomView {
         g.strokeEllipse(x + TILE / 2, y + TILE * 0.6, TILE * 0.9, TILE * 0.7);
         break;
       }
+      case 'cabin': {
+        // A galley cart bay: grey lockers with a lit call button.
+        const lift = tall ? 16 : 8;
+        g.fillStyle(p.wall, 1);
+        g.fillRoundedRect(x + 4, y + 4 - lift, TILE - 8, TILE - 6 + lift, 6);
+        g.lineStyle(2, shade(p.wall, -0.3), 1);
+        g.lineBetween(x + TILE / 2, y + 8 - lift, x + TILE / 2, y + TILE - 6);
+        g.fillStyle(p.accent, 1);
+        g.fillCircle(x + TILE / 2, y + 12 - lift, 3);
+        g.lineStyle(3, INK, 1);
+        g.strokeRoundedRect(x + 4, y + 4 - lift, TILE - 8, TILE - 6 + lift, 6);
+        break;
+      }
+      case 'seat': {
+        // A pair of plane seats with headrests and a stripe of seat-belt.
+        for (let i = 0; i < 2; i++) {
+          const sx = x + 4 + i * (TILE / 2 - 2);
+          const sw = TILE / 2 - 6;
+          g.fillStyle(p.block, 1);
+          g.fillRoundedRect(sx, y + 2, sw, TILE - 6, 6);
+          g.fillStyle(p.blockTop, 1);
+          g.fillRoundedRect(sx + 2, y - 6, sw - 4, 16, 5);
+          g.fillStyle(0xf4efe6, 0.9);
+          g.fillRect(sx + 4, y - 3, sw - 8, 5);
+          g.fillStyle(shade(p.block, -0.3), 1);
+          g.fillRect(sx + 2, y + TILE * 0.55, sw - 4, 4);
+          g.lineStyle(2.5, INK, 1);
+          g.strokeRoundedRect(sx, y - 6, sw, TILE, 6);
+        }
+        break;
+      }
+      case 'toy': {
+        // A big alphabet block.
+        const colors = [0xe0484d, 0x3f6fb5, 0xf2c14e, 0x97ce4c];
+        const col = colors[Math.abs(Math.round(jitter(k, 5) * 3))];
+        const lift = 10;
+        g.fillStyle(shade(col, -0.25), 1);
+        g.fillRoundedRect(x + 6, y + 6, TILE - 12, TILE - 10, 4);
+        g.fillStyle(col, 1);
+        g.fillRoundedRect(x + 6, y + 6 - lift, TILE - 12, TILE - 14, 4);
+        g.fillStyle(0xfdf6e3, 1);
+        g.fillRoundedRect(x + 16, y + 12 - lift, TILE - 32, TILE - 28, 3);
+        g.lineStyle(3, shade(col, -0.35), 1);
+        const L = Math.abs(Math.round(jitter(k, 6) * 2));
+        const cx = x + TILE / 2;
+        const cy = y + TILE / 2 - lift - 2;
+        if (L === 0) {
+          g.lineBetween(cx - 6, cy + 7, cx, cy - 7);
+          g.lineBetween(cx, cy - 7, cx + 6, cy + 7);
+          g.lineBetween(cx - 3, cy + 2, cx + 3, cy + 2);
+        } else if (L === 1) {
+          g.lineBetween(cx - 5, cy - 7, cx - 5, cy + 7);
+          g.strokeCircle(cx - 1, cy - 3, 4);
+          g.strokeCircle(cx - 1, cy + 4, 4);
+        } else {
+          g.beginPath();
+          g.arc(cx, cy, 7, 0.6, Math.PI * 2 - 0.6, false);
+          g.strokePath();
+        }
+        g.lineStyle(3, INK, 1);
+        g.strokeRoundedRect(x + 6, y + 6 - lift, TILE - 12, TILE - 4 + lift - 10, 4);
+        break;
+      }
+      case 'hedge': {
+        // A trimmed round hedge.
+        g.fillStyle(p.block, 1);
+        g.fillEllipse(x + TILE / 2, y + TILE * 0.55, TILE * 0.95, TILE * 0.8);
+        g.fillStyle(p.blockTop, 1);
+        for (let i = 0; i < 4; i++) g.fillCircle(x + 14 + i * 10 + jitter(k, i) * 3, y + TILE * 0.38 + jitter(k, i + 5) * 4, 9);
+        g.lineStyle(3, INK, 1);
+        g.strokeEllipse(x + TILE / 2, y + TILE * 0.55, TILE * 0.95, TILE * 0.8);
+        break;
+      }
       case 'house':
       case 'furniture': {
         // A cabinet or a stack of boxes.
@@ -556,7 +629,7 @@ export class RoomView {
   }
 
   /** Walls that look like the place: lockers, lumpy hills, metal panels, wallpaper. */
-  private paintStyledWalls(g: Phaser.GameObjects.Graphics, gaps: Set<string>, walls: 'lockers' | 'hills' | 'panels' | 'house'): void {
+  private paintStyledWalls(g: Phaser.GameObjects.Graphics, gaps: Set<string>, walls: 'lockers' | 'hills' | 'panels' | 'house' | 'cabin'): void {
     const p = this.biome.palette;
     const W = this.widthPx;
     const H = this.heightPx;
@@ -627,6 +700,29 @@ export class RoomView {
           g.lineBetween(0, y, TILE, y);
           g.lineBetween(W - TILE, y, W, y);
         }
+        break;
+      }
+      case 'cabin': {
+        // A plane cabin: overhead bins along the top, round windows full of sky on the sides.
+        g.fillStyle(p.wallTop, 1);
+        g.fillRect(0, 0, W, TILE * 0.45);
+        g.lineStyle(2, shade(p.wallTop, -0.3), 1);
+        for (let x = TILE; x < W - TILE; x += TILE * 1.5) g.lineBetween(x, 4, x, TILE * 0.45 - 2);
+        const window = (wx: number, wy: number) => {
+          g.fillStyle(0xbfe4ff, 1);
+          g.fillEllipse(wx, wy, 18, 24);
+          g.fillStyle(0xffffff, 0.9);
+          g.fillEllipse(wx - 3, wy + 4, 10, 5);
+          g.lineStyle(2.5, INK, 1);
+          g.strokeEllipse(wx, wy, 18, 24);
+        };
+        for (let x = TILE * 1.5; x < W - TILE; x += TILE) window(x, TILE * 0.72);
+        for (let y = TILE * 1.5; y < H - TILE; y += TILE) {
+          window(TILE * 0.5, y);
+          window(W - TILE * 0.5, y);
+        }
+        g.fillStyle(shade(p.wall, -0.15), 1);
+        g.fillRect(0, H - TILE * 0.35, W, TILE * 0.35);
         break;
       }
       case 'house': {

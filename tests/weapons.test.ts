@@ -89,7 +89,8 @@ describe('hits to kill', () => {
         if (!act.weapon) continue;
         const damage = statsWith(act).damage;
         for (const e of actEnemies(reg, act)) {
-          if (e.boss || e.hazard) continue;
+          // Bosses have their own test; hazards and stalkers can't be killed.
+          if (e.boss || e.hazard || e.stalker) continue;
           const hits = Math.ceil(e.hp / damage - 1e-9);
           expect(within(hits, ENEMIES.hitsToKill.regular), `${act.id}: ${e.id} takes ${hits} hits`).toBe(true);
           if (e.elite) {
