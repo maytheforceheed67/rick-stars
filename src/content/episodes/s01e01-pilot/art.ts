@@ -460,23 +460,6 @@ export const PILOT_PROP_ART: SpriteArt[] = [
       wonkyRect(g, w * 0.3, h * 0.02, w * 0.4, 9, { fill: 0x8a8699, seed: 113, radius: 3, lineWidth: 2 });
     },
   },
-  {
-    key: 'flying-car',
-    width: 150,
-    height: 86,
-    draw: (g, w, h) => {
-      g.fillStyle(0x000000, 0.25);
-      g.fillEllipse(w / 2, h - 6, w * 0.9, 14);
-      wonkyPoly(g, [[10, h * 0.55], [w * 0.18, h * 0.3], [w * 0.62, h * 0.24], [w * 0.9, h * 0.38], [w - 6, h * 0.62], [w * 0.86, h * 0.84], [w * 0.14, h * 0.84]], { fill: 0x7a8a9a, seed: 121, wobble: 3, lineWidth: 3 });
-      wonkyPoly(g, [[w * 0.28, h * 0.33], [w * 0.36, h * 0.08], [w * 0.6, h * 0.08], [w * 0.66, h * 0.3]], { fill: 0xbfe6f7, fillAlpha: 0.8, seed: 122, lineWidth: 3 });
-      wonkyRect(g, w * 0.06, h * 0.56, w * 0.18, 12, { fill: 0xe0484d, seed: 123, radius: 4, lineWidth: 2 });
-      wonkyRect(g, w * 0.78, h * 0.5, w * 0.16, 12, { fill: 0xffd54a, seed: 124, radius: 4, lineWidth: 2 });
-      for (const x of [w * 0.26, w * 0.72]) blob(g, x, h * 0.84, 12, 7, { fill: 0x3a3f58, seed: Math.round(x), lineWidth: 2.5 });
-      g.lineStyle(2, INK, 1);
-      g.lineBetween(w * 0.4, h * 0.45, w * 0.55, h * 0.45);
-      dot(g, w * 0.5, h * 0.62, 4, PORTAL_GREEN);
-    },
-  },
   GOLDENFOLD_SPRITE,
   {
     key: 'goldenfold-desk',

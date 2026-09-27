@@ -3,6 +3,7 @@
  * boss taunts, Goldenfold, the family and the critters. Cutscene panels keep their words in
  * cutscenes.ts. All lines are original; Rick burps mid-sentence as —*urrp*—.
  */
+import type { RickLines } from '../../../engine/types';
 
 /** One step of the neutrino-bomb puzzle: what sleeping Rick mumbles, and the right choice. */
 export interface DefuseStep {
@@ -33,6 +34,41 @@ export const EPILOGUE_QUESTIONS: QuizQuestion[] = [
     options: ["Energy can't be created or destroyed, only change form", 'Heat always flows from cold to hot', 'Everything eventually turns into pizza', 'For every action, there is an equal and opposite Summer'],
   },
 ];
+
+/** Rick walking with Morty through Dimension 35-C. */
+export const RICK_ALONG_35C: RickLines = {
+  enter: [
+    'Look at this place. Pastel everything. Gross.',
+    'Keep your eyes peeled for Mega Trees, Morty.',
+    "Critters. Shoot 'em before they, uh, do whatever they do.",
+    'Smells like cotton candy and —*urrp*— regret in here.',
+    "Don't touch anything. Unless it's attacking you. Then touch it with lasers.",
+  ],
+  clear: [
+    "Nice. You're a natural, Morty. Don't let it go to your head.",
+    'See? Science.',
+    "That's what I'm talking about, Morty!",
+    'Great. Now grab the stuff. Stuff is how we win.',
+  ],
+  hurt: ['Walk it off, Morty!', "Dodge, Morty! It's the D in dodge!", "Ooh. That's gonna leave a mark."],
+  item: ["Ooh, grab that. That's useful. Probably.", 'Pocket it, Morty. Science pocket.', 'Nice find. I was gonna take that.'],
+  idle: ["We don't have all day, Morty. We have, like, half a day.", '—*urrp*—', 'Seeds, Morty. Mega Seeds. Focus.'],
+};
+
+/** Rick walking with Morty through Interdimensional Customs. */
+export const RICK_ALONG_CUSTOMS: RickLines = {
+  enter: [
+    'Act natural, Morty. Naturally natural.',
+    "Don't make eye contact with the bug guys.",
+    'Bureaucracy, Morty. The real monster.',
+    'Just smile and —*urrp*— nod.',
+    "If anyone asks, we're here for the conference.",
+  ],
+  clear: ['Robots, Morty. They were robots.', 'Keep moving before they send more.', "That's the spirit. The illegal spirit."],
+  hurt: ["Don't die, Morty. I'd have to fill out a form.", 'Dodge the lasers, Morty!', 'Ow. For you. Not for me.'],
+  item: ['Contraband! Nice.', "Pocket it. Nobody's checking. Anymore."],
+  idle: ['Every second we stand here, the line gets longer, Morty.', '—*urrp*—', 'Move it, Morty. Portal home, remember?'],
+};
 
 export const LINES = {
   rick: {

@@ -1,6 +1,6 @@
 /** The Pilot's acts: prologue, three procedural acts, epilogue. */
 import type { ActDef, BiomeDef, Weighted } from '../../../engine/types';
-import { LINES } from './dialogue';
+import { LINES, RICK_ALONG_35C, RICK_ALONG_CUSTOMS } from './dialogue';
 import { C35_COMBAT, CUSTOMS_COMBAT, CUSTOMS_QUEUES, SCHOOL_COMBAT } from './rooms';
 
 const RICK = { gadget: 'freeze-ray', entrance: 'walk' } as const;
@@ -136,6 +136,8 @@ export const PROLOGUE: ActDef = {
   mechanics: [],
   intro: ['pilot-wake-up'],
   outro: ['pilot-breakfast'],
+  // Bomb defused, the ship flies them home.
+  travel: { by: 'ship', label: 'Fly home' },
 };
 
 export const SCHOOL: ActDef = {
@@ -186,7 +188,8 @@ export const SCHOOL: ActDef = {
   startStatuses: ['sleep-deprived'],
   intro: ['pilot-school-intro'],
   outro: ['pilot-frank-shatter', 'pilot-principal'],
-  exitLabel: 'Leave school with Rick',
+  // Rick pulls Morty out of school through a portal.
+  travel: { by: 'portal', label: "Step through Rick's portal" },
 };
 
 export const DIMENSION_35C: ActDef = {
@@ -231,12 +234,14 @@ export const DIMENSION_35C: ActDef = {
   specialRoom: 'pilot-mega-grove',
   finale: [{ kind: 'encounter', encounter: 'pilot-big-mega-tree' }],
   weapon: { item: 'ricks-spare-ray-gun', when: 'start', from: 'rick', line: LINES.rick.spareGun },
-  rick: RICK,
+  // Rick is with Morty the whole time in 35-C.
+  rick: { ...RICK, follows: RICK_ALONG_35C },
   mechanics: ['grappling-shoes'],
   intro: ['pilot-35c-arrival'],
   outro: ['pilot-35c-outro'],
-  exitArt: 'exit-transit',
-  exitLabel: 'Take the transit gate to Customs',
+  arrive: 'portal',
+  // The portal gun is empty, so it's the public transit portal to Customs.
+  travel: { by: 'departure', label: 'Take the transit portal to Customs', art: 'exit-transit' },
 };
 
 export const CUSTOMS: ActDef = {
@@ -295,11 +300,14 @@ export const CUSTOMS: ActDef = {
   ],
   // Canon: Rick hands over his own gun when their cover is blown (the suspicion mechanic).
   weapon: { item: 'ricks-ray-gun', when: 'scripted', from: 'rick', line: LINES.rick.takeMyGun },
-  rick: RICK,
+  rick: { ...RICK, follows: RICK_ALONG_CUSTOMS },
   mechanics: ['suspicion'],
   intro: ['pilot-customs-intro'],
   outro: ['pilot-customs-outro'],
-  exitLabel: 'Into the departure hall',
+  arrive: 'departure',
+  stageExit: { art: 'exit-gate', label: 'Into the departure hall' },
+  // The escape ends at the departure portal home.
+  travel: { by: 'departure', label: 'Through the departure portal' },
 };
 
 export const EPILOGUE: ActDef = {
@@ -315,6 +323,7 @@ export const EPILOGUE: ActDef = {
   finale: [{ kind: 'encounter', encounter: 'pilot-epilogue' }],
   // Home again: Rick took his gun back on the way through the portal.
   unarmed: true,
+  arrive: 'departure',
   rick: RICK,
   mechanics: [],
 };

@@ -32,6 +32,8 @@ export interface StageHost {
 interface Actor {
   img: Phaser.GameObjects.Image;
   shadow: Phaser.GameObjects.Ellipse;
+  /** Where their speech bubbles go. */
+  anchor: () => Vec | null;
 }
 
 /** Pixels per second people walk at in scenes. */
@@ -82,6 +84,46 @@ export class Stage {
 
   has(who: ContentId): boolean {
     return this.actors.has(who);
+  }
+
+  /** Puts a character in the room if they aren't already (a companion walking with Morty). */
+  ensureActor(who: ContentId, at: Vec): boolean {
+    const existing = this.actors.get(who);
+    if (existing) {
+      // Reclaim their speech bubbles (a Rick call borrows them for a moment).
+      this.host.setAnchor(who, existing.anchor);
+      return true;
+    }
+    return !!this.addActor(who, at);
+  }
+
+  setActorVisible(who: ContentId, visible: boolean): void {
+    const a = this.actors.get(who);
+    a?.img.setVisible(visible);
+    a?.shadow.setVisible(visible);
+  }
+
+  /**
+   * Walks a character toward a spot for one frame (companions trailing Morty). Returns whether
+   * they moved.
+   */
+  follow(who: ContentId, target: Vec, dt: number, t: number): boolean {
+    const a = this.actors.get(who);
+    if (!a) return false;
+    const dx = target.x - a.img.x;
+    const dy = target.y - a.img.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 6) {
+      a.img.setAngle(0);
+      return false;
+    }
+    const k = 1 - Math.exp(-dt * 4.5);
+    const x = a.img.x + dx * k;
+    const y = a.img.y + dy * k;
+    a.img.setPosition(x, y).setDepth(y).setAngle(Math.sin(t * 16) * 5);
+    if (Math.abs(dx) > 4) a.img.setFlipX(dx < 0);
+    a.shadow.setPosition(x, y + 12);
+    return true;
   }
 
   /** Removes every actor and drops any scene in progress (leaving the room). */
@@ -206,6 +248,11 @@ export class Stage {
       return;
     }
     const dest = this.spot(to);
+    // Already here (Rick walking along with Morty): just walk over.
+    if (this.actors.has(who)) {
+      this.walk(who, dest, WALK_SPEED, done);
+      return;
+    }
     if (via === 'door') {
       const from = this.host.doorNear(dest);
       const a = this.addActor(who, from);
@@ -366,9 +413,10 @@ export class Stage {
     const fh = img.frame.height;
     img.setOrigin(0.5, (fh - TEXTURE_PAD - 12) / fh);
     const shadow = scene.add.ellipse(at.x, at.y + 12, 34, 10, 0x000000, 0.22).setDepth(-400);
-    const actor = { img, shadow };
+    const anchor = () => (img.active ? { x: img.x, y: img.y - img.displayHeight * img.originY - 6 } : null);
+    const actor = { img, shadow, anchor };
     this.actors.set(who, actor);
-    this.host.setAnchor(who, () => (img.active ? { x: img.x, y: img.y - img.displayHeight * img.originY - 6 } : null));
+    this.host.setAnchor(who, anchor);
     return actor;
   }
 

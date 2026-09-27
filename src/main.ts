@@ -19,6 +19,7 @@ import { HudScene } from './scenes/HudScene';
 import { PauseScene } from './scenes/PauseScene';
 import { RunScene } from './scenes/RunScene';
 import { SeasonMapScene } from './scenes/SeasonMapScene';
+import { TitleCardScene } from './scenes/TitleCardScene';
 import { TitleScene } from './scenes/TitleScene';
 
 function storage(): SaveStorage {
@@ -53,7 +54,7 @@ const game = new Phaser.Game({
   physics: { default: 'arcade', arcade: { debug: false } },
   audio: { noAudio: true },
   render: { antialias: true },
-  scene: [BootScene, TitleScene, GarageScene, SeasonMapScene, RunScene, HudScene, CutsceneScene, PauseScene, GameOverScene, CharacterSheetScene],
+  scene: [BootScene, TitleScene, GarageScene, SeasonMapScene, RunScene, HudScene, CutsceneScene, TitleCardScene, PauseScene, GameOverScene, CharacterSheetScene],
 });
 
 if (debug) ensureDebugApi(game);

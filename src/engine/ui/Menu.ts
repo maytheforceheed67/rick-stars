@@ -26,6 +26,7 @@ export interface MenuOptions {
 
 export class Menu {
   private index = 0;
+  private destroyed = false;
   private readonly rows: { bg: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text; detail?: Phaser.GameObjects.Text; zone: Phaser.GameObjects.Zone }[] = [];
   private readonly keys: Record<string, Phaser.Input.Keyboard.Key>;
   private active = true;
@@ -78,7 +79,7 @@ export class Menu {
 
   /** Call from the scene's update(). */
   update(): void {
-    if (!this.active) return;
+    if (!this.active || this.destroyed) return;
     const JD = Phaser.Input.Keyboard.JustDown;
     const k = this.keys;
     if (JD(k.W) || JD(k.UP)) this.move(-1);
@@ -134,6 +135,8 @@ export class Menu {
   }
 
   refresh(): void {
+    // An item's action may have closed this menu (and opened another); nothing left to draw.
+    if (this.destroyed) return;
     this.rows.forEach((r, i) => {
       const it = this.items[i];
       const on = i === this.index && this.active;
@@ -151,6 +154,7 @@ export class Menu {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.rows.forEach((r) => {
       r.bg.destroy();
       r.label.destroy();

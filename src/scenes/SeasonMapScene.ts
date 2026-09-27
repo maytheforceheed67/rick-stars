@@ -1,7 +1,7 @@
 /**
- * Season Map: Season 1's episodes as nodes on a path. Playable episodes can be started with a
- * random seed or a typed one; the rest are locked as "coming soon". The episode after the
- * furthest clear is marked "next up".
+ * Season Map, shown as the navigation screen of Rick's ship ("Where to, Morty?"): Season 1's
+ * episodes as nodes on a path. Playable episodes can be started with a random seed or a typed
+ * one; the rest are locked as "coming soon". The episode after the furthest clear is "next up".
  */
 import Phaser from 'phaser';
 import { LATER_SEASONS_LABEL } from '../content/registry';
@@ -42,7 +42,9 @@ export class SeasonMapScene extends Phaser.Scene {
     this.menu = null;
     this.labels = [];
     drawStarfield(this, 'season-map');
-    this.add.text(GAME_WIDTH / 2, 44, 'SEASON 1', displayStyle(52, '#97ce4c')).setOrigin(0.5);
+    this.drawConsole();
+    this.add.text(GAME_WIDTH / 2, 46, 'WHERE TO, MORTY?', displayStyle(46, '#97ce4c')).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, 84, "RICK'S SHIP  ·  NAVIGATION  ·  SEASON 1", textStyle(14, '#8fd3a8')).setOrigin(0.5);
     this.nodes = this.listings.map((_, i) => {
       const col = i % 6;
       const row = Math.floor(i / 6);
@@ -86,6 +88,21 @@ export class SeasonMapScene extends Phaser.Scene {
     svc().audio.music('garage');
   }
 
+  /** The ship's dashboard around the screen: a metal bezel, rivets and a faint scanline glow. */
+  private drawConsole(): void {
+    const g = this.add.graphics().setDepth(40);
+    const edge = 14;
+    g.lineStyle(edge * 2, 0x3a3f58, 1);
+    g.strokeRoundedRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 28);
+    g.lineStyle(3, 0x1a1424, 1);
+    g.strokeRoundedRect(edge, edge, GAME_WIDTH - edge * 2, GAME_HEIGHT - edge * 2, 18);
+    g.fillStyle(0x8a8d99, 1);
+    for (const [x, y] of [[8, 8], [GAME_WIDTH - 8, 8], [8, GAME_HEIGHT - 8], [GAME_WIDTH - 8, GAME_HEIGHT - 8], [GAME_WIDTH / 2, 7], [GAME_WIDTH / 2, GAME_HEIGHT - 7]]) g.fillCircle(x, y, 4);
+    const scan = this.add.graphics().setDepth(39);
+    scan.fillStyle(0x97ce4c, 0.035);
+    for (let y = edge; y < GAME_HEIGHT - edge; y += 4) scan.fillRect(edge, y, GAME_WIDTH - edge * 2, 1);
+  }
+
   private listing(): EpisodeListing {
     return this.listings[this.selected];
   }
@@ -117,7 +134,7 @@ export class SeasonMapScene extends Phaser.Scene {
             this.playPrologue = !this.playPrologue;
           },
         },
-        { label: 'Back to the Garage', onSelect: () => this.scene.start('Garage') },
+        { label: 'Climb out of the ship', onSelect: () => this.scene.start('Garage') },
       ],
       { width: 460, spacing: 50, fontSize: 19, onBack: () => this.scene.start('Garage') },
     );

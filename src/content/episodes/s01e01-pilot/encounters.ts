@@ -279,7 +279,7 @@ export const customsEscape: EncounterDef = {
     const exit = api.room.markers('X')[0];
     return {
       onEnter() {
-        if (exit) api.addProp({ art: 'exit-portal', x: exit.x, y: exit.y + 36 });
+        if (exit) api.addProp({ art: 'exit-departure', x: exit.x, y: exit.y + 40 });
         active = true;
         api.setTimer(E.seconds, 'PORTAL CLOSING');
         api.setObjective('Run for the portal home!');

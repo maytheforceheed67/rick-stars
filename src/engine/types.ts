@@ -915,7 +915,21 @@ export interface BiomeDef {
   };
   /** Pattern drawn on floor tiles. */
   floorPattern: 'checker' | 'speckle' | 'grid' | 'planks' | 'blobs';
+  /** How the place's walls, furniture and doors are drawn, so it looks like itself. */
+  style?: BiomeStyle;
   music: string;
+}
+
+export interface BiomeStyle {
+  /**
+   * The room's walls, and the tall blocks ('#') inside it: plain bricks, school lockers, lumpy
+   * pastel hills, grey metal panels, or house wallpaper.
+   */
+  walls?: 'bricks' | 'lockers' | 'hills' | 'panels' | 'house';
+  /** Low blocks ('='): crates, school desks, rocks, counters, furniture. */
+  blocks?: 'crate' | 'desk' | 'rock' | 'counter' | 'furniture';
+  /** Doors between rooms: plain, classroom doors, natural archways, security gates, house doors. */
+  doors?: 'plain' | 'classroom' | 'arch' | 'gate' | 'house';
 }
 
 export type FinaleStage =
@@ -967,6 +981,34 @@ export interface StoryWeapon {
   line: string;
 }
 
+/**
+ * How Morty gets between acts, the way the show does it: Rick's ship (the flying car he built in
+ * the garage), a green portal from Rick's portal gun, or an official departure portal.
+ */
+export type TravelKind = 'ship' | 'portal' | 'departure';
+
+export interface TravelSpec {
+  by: TravelKind;
+  /** What the way out says ("Step through Rick's portal"). */
+  label: string;
+  /** Sprite for the way out (defaults: the flying car, a green portal, a departure portal). */
+  art?: string;
+}
+
+/** What Rick says while he walks with Morty (short, burps included). */
+export interface RickLines {
+  /** Walking into a room for the first time. */
+  enter: string[];
+  /** A room cleared. */
+  clear: string[];
+  /** Morty got hurt. */
+  hurt: string[];
+  /** Morty picked something up. */
+  item: string[];
+  /** Nothing has happened for a while. */
+  idle: string[];
+}
+
 export interface ActDef {
   id: string;
   name: string;
@@ -986,7 +1028,16 @@ export interface ActDef {
   shop?: ShopDef;
   specialRoom?: ContentId;
   finale: FinaleStage[];
-  rick: { gadget: ContentId; entrance: 'walk' | 'portal' };
+  rick: {
+    /** What he does when Morty calls him with a full Rick Meter. */
+    gadget: ContentId;
+    entrance: 'walk' | 'portal';
+    /**
+     * Rick walks with Morty through this act and comments on it. He's not a fighter: he can't be
+     * hurt, doesn't block shots, and a Rick call is him stepping in.
+     */
+    follows?: RickLines;
+  };
   mechanics: ContentId[];
   /** Where Morty's weapon comes from in this act. Required for any act with enemies. */
   weapon?: StoryWeapon;
@@ -996,9 +1047,15 @@ export interface ActDef {
   startStatuses?: ContentId[];
   intro?: ContentId[];
   outro?: ContentId[];
-  /** Art for the way out once the finale is done (defaults to a portal). */
-  exitArt?: string;
-  exitLabel?: string;
+  /**
+   * How Morty leaves once the finale is done. Every act but an episode's last needs one: there
+   * are no generic exit doors between acts.
+   */
+  travel?: TravelSpec;
+  /** How he shows up at the start (stepping out of a portal, the ship landing). */
+  arrive?: TravelKind;
+  /** The way into the next finale stage when there are several (a security gate). */
+  stageExit?: { art: string; label: string };
   music?: string;
 }
 

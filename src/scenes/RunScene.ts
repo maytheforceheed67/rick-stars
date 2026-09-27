@@ -53,10 +53,13 @@ import type {
   RoomKind,
   RoomScript,
   RoomScriptApi,
+  RickLines,
   SceneStep,
   StatusFlags,
   StoryWeapon,
   TileKind,
+  TravelKind,
+  TravelSpec,
   TransformationDef,
   Vec,
   VfxSpec,
@@ -91,6 +94,9 @@ export interface RunSummary {
 }
 
 const MAX_ENEMIES = 45;
+
+/** The way out for each kind of trip, unless the act names its own art. */
+const TRAVEL_ART: Record<TravelKind, string> = { ship: 'flying-car', portal: 'exit-portal', departure: 'exit-departure' };
 
 /** One enemy a combat room will bring in. */
 interface SpawnPlan {
@@ -173,6 +179,12 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private lockedBeforeScene = false;
   /** Run time when the act's story weapon changes hands (0 = nothing pending). */
   private weaponDue = 0;
+  /** Travelling between acts (the ship trip or a portal swallowing the screen). */
+  private traveling = false;
+  /** Rick walking with Morty (acts with rick.follows): when he last spoke, and a line counter. */
+  private rickTalkAt = 0;
+  private rickLineCount = 0;
+  private travelFx: Phaser.GameObjects.GameObject[] = [];
   /** Buddies from items, and the junk circling Morty. */
   private companions: Companion[] = [];
   private orbiters: Orbiters | null = null;
@@ -234,6 +246,10 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.interactable = null;
     this.pendingSwap = null;
     this.weaponDue = 0;
+    this.traveling = false;
+    this.travelFx = [];
+    this.rickTalkAt = 0;
+    this.rickLineCount = 0;
     this.companions = [];
     this.orbiters = null;
     this.critAcc = 0;
@@ -302,7 +318,25 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
     if (s.debug) installDebug(this);
-    this.time.delayedCall(20, () => this.startAct(Math.min(data.startAct ?? 0, this.run.sequence.length - 1)));
+    const first = Math.min(data.startAct ?? 0, this.run.sequence.length - 1);
+    this.time.delayedCall(20, () => {
+      // Every run opens with the episode's title card (debug jumps go straight in).
+      if (first > 0) {
+        this.startAct(first);
+        return;
+      }
+      this.scene.pause();
+      this.scene.launch('TitleCard', {
+        season: ep.season,
+        number: ep.number,
+        title: ep.title,
+        onDone: () => {
+          this.scene.resume();
+          this.input.keyboard?.resetKeys();
+          this.startAct(0);
+        },
+      });
+    });
   }
 
   private cleanup(): void {
@@ -515,6 +549,48 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     }
   }
 
+  // ---- Rick walking with Morty ----------------------------------------------------------------
+
+  /** Where Rick trails: a step behind Morty, on the side away from where he's aiming. */
+  private rickSpot(): Vec {
+    const p = this.player;
+    const a = p.aimAngle + Math.PI + 0.5;
+    return this.clampToRoom({ x: p.x + Math.cos(a) * 78, y: p.y + Math.sin(a) * 44 });
+  }
+
+  /** In acts where the episode has Rick along, he's in every room with Morty. */
+  private placeRickBuddy(): void {
+    if (!this.run.act.rick.follows || !this.roomView) return;
+    const spot = this.rickSpot();
+    this.stage.ensureActor('rick', spot);
+  }
+
+  private updateRickBuddy(dt: number): void {
+    const lines = this.run.act.rick.follows;
+    if (!lines || this.stage.running || this.rickBusy || this.traveling || !this.stage.has('rick')) return;
+    const target = this.rickSpot();
+    // He doesn't walk through walls; he waits where he is until Morty moves on.
+    const view = this.roomView;
+    const free = !view || (view.tileAt(target.x, target.y) !== 'wall' && view.tileAt(target.x, target.y) !== 'block');
+    if (free) this.stage.follow('rick', target, dt, this.run.time);
+    if (this.run.time - this.rickTalkAt > 26) this.rickSays('idle');
+  }
+
+  /** Rick comments on what just happened, now and then (never talks over himself). */
+  private rickSays(kind: keyof RickLines, chance = 1): void {
+    const lines = this.run.act.rick.follows;
+    if (!lines || !this.stage.has('rick') || this.stage.running || this.dead) return;
+    const pool = lines[kind];
+    if (!pool.length || this.run.time - this.rickTalkAt < 7) return;
+    // A fixed stride through the pool, so his chatter never touches the gameplay RNG.
+    this.rickLineCount++;
+    if (chance < 1 && (this.rickLineCount * 7919) % 100 >= chance * 100) return;
+    this.rickTalkAt = this.run.time;
+    const line = pool[(this.rickLineCount * 5) % pool.length];
+    this.say('rick', line, 2.6);
+    if (this.rickLineCount % 3 === 0) this.after(1.2, () => this.sfx('burp'), true);
+  }
+
   // ---- companions, orbiting junk, charged shots and looks ------------------------------------
 
   private companionHost(): CompanionHost {
@@ -574,6 +650,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private updateGear(dt: number): void {
     const st = this.stats();
     const p = this.player;
+    this.updateRickBuddy(dt);
     for (const c of this.companions) c.update(dt);
     this.orbiters?.update(dt, st.orbit);
     if (p.isDashing && st.dashEraseShots > 0) {
@@ -842,6 +919,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.weaponDue = 0;
     this.playCutscenes(act.intro ?? [], () => {
       this.enterRoom(floor.startId);
+      if (act.arrive) this.arrive(act.arrive);
       this.hud.banner(act.name, act.subtitle);
       // A beat after arriving, and never later than the first room he walks into.
       if (act.weapon?.when === 'start') this.weaponDue = run.time + 1.6;
@@ -961,6 +1039,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.player.dashLeft = 0;
     this.lastSafe = { ...pos };
     this.companions.forEach((c) => c.reposition());
+    this.placeRickBuddy();
     this.setupCamera(view);
 
     this.restoreContents(st);
@@ -991,6 +1070,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.doorsOpen = true;
     this.updateDoors(true);
     this.updateMusic();
+    if (firstVisit && fr && fr.kind !== 'start') this.after(0.8, () => this.rickSays('enter', 0.45), true);
     // Walked on before the act's weapon changed hands: hand it over right away.
     if (this.weaponDue) this.weaponDue = Math.min(this.weaponDue, run.time + 0.4);
   }
@@ -1249,6 +1329,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     }
     this.mechanics.forEach((m) => m.inst.onRoomClear?.(this.roomInfoObj!));
     if (reward) this.rollRoomReward();
+    this.after(0.6, () => this.rickSays('clear', 0.6), true);
   }
 
   private rollRoomReward(): void {
@@ -1605,44 +1686,186 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.spawnExit();
   }
 
+  /**
+   * The way on once a finale stage is done: into the next stage (a security gate), or out of the
+   * act the way the show travels (Rick's ship, a portal). Never a generic door.
+   */
   private spawnExit(): void {
     if (this.exitProp || !this.roomView) return;
     const act = this.run.act;
     const more = this.run.stage + 1 < act.finale.length;
     const marker = this.roomInfoObj!.markers('X')[0];
     const pos = marker ?? this.openSpotNear(this.roomView.widthPx / 2 + TILE * 2, this.roomView.heightPx / 2);
-    this.exitProp = this.objects.addProp({
-      art: act.exitArt ?? 'exit-portal',
-      x: pos.x,
-      y: pos.y + 24,
-      interact: { label: more ? 'Keep going' : (act.exitLabel ?? 'Leave'), fn: () => this.useExit() },
-    });
+    const travel = act.travel;
+    const art = more ? (act.stageExit?.art ?? 'exit-gate') : (travel?.art ?? TRAVEL_ART[travel?.by ?? 'portal']);
+    const label = more ? (act.stageExit?.label ?? 'Keep going') : (travel?.label ?? 'Head home');
+    const ship = !more && travel?.by === 'ship';
+    this.exitProp = this.objects.addProp({ art, x: pos.x, y: pos.y + (ship ? 34 : 24), interact: { label, fn: () => this.useExit() } });
     this.exitProp.pulse();
-    this.fx.burst('portal', pos.x, pos.y);
-    this.sfx('portal');
+    if (ship) {
+      this.fx.burst('smoke', pos.x, pos.y + 20, 10);
+      this.sfx('door-open');
+    } else {
+      this.fx.burst('portal', pos.x, pos.y);
+      this.sfx('portal');
+    }
   }
 
   private useExit(): void {
     const act = this.run.act;
     const next = this.run.stage + 1;
-    if (next < act.finale.length) this.transitionTo(() => this.enterStage(next));
+    if (next < act.finale.length) {
+      this.transitionTo(() => this.enterStage(next));
+      return;
+    }
+    if (act.travel && this.exitProp) this.travelOut(act.travel, this.exitProp, () => this.finishAct(true));
     else this.finishAct();
   }
 
-  private finishAct(): void {
+  /**
+   * Ends the act: travel out (unless Morty already did, through the exit), the outro recap, then
+   * the next act.
+   */
+  private finishAct(traveled = false): void {
     if (this.finishingAct || this.ended) return;
+    const act = this.run.act;
+    if (!traveled && act.travel && !this.run.isLastAct) {
+      this.travelOut(act.travel, null, () => this.finishAct(true));
+      return;
+    }
     this.finishingAct = true;
     const run = this.run;
     this.mechanics.forEach((m) => m.inst.onActEnd?.());
     run.statuses.actEnded();
     this.invalidateStats();
-    const act = run.act;
     this.player.setControlLocked(false);
     this.playCutscenes(act.outro ?? [], () => {
       this.finishingAct = false;
+      this.clearTravelFx();
       if (run.isLastAct) this.finishRun(true);
       else this.startAct(run.actIndex + 1);
     });
+  }
+
+  // ---- travel between acts -------------------------------------------------------------------
+
+  /**
+   * Morty leaves the act the way the show does it: he climbs into Rick's ship and it lifts off
+   * across the sky, or he steps into a portal and it swallows the screen.
+   */
+  private travelOut(spec: TravelSpec, exit: PropObj | null, done: () => void): void {
+    if (this.traveling) return;
+    this.traveling = true;
+    const p = this.player;
+    p.setControlLocked(true);
+    p.iframes = Math.max(p.iframes, 99);
+    this.hintText = null;
+    this.objectiveText = null;
+    // Rick comes along if he's standing around (after freezing Frank, say).
+    const rickAt = this.stage.position('rick');
+    const target = exit ? { x: exit.x, y: exit.y - (spec.by === 'ship' ? 30 : 14) } : { x: p.x, y: p.y };
+    const proxy = { x: p.x, y: p.y };
+    const dist = Math.hypot(target.x - p.x, target.y - p.y);
+    if (rickAt && exit) this.stage.play([{ kind: 'walk', who: 'rick', to: { x: target.x + 20, y: target.y } }]);
+    this.tweens.add({
+      targets: proxy,
+      x: target.x,
+      y: target.y,
+      duration: Math.min(700, 120 + dist * 1.6),
+      onUpdate: () => p.setPosition(proxy.x, proxy.y),
+      onComplete: () => {
+        if (spec.by === 'ship') this.shipTrip(exit, done);
+        else this.portalTrip(spec.by, target, done);
+      },
+    });
+  }
+
+  /** Into the portal: Morty spins down into it, then it swells to fill the screen. */
+  private portalTrip(kind: TravelKind, at: Vec, done: () => void): void {
+    const p = this.player;
+    this.sfx('portal');
+    this.tweens.add({ targets: p.sprite, scale: 0.1, angle: 540, alpha: 0.2, duration: 380, ease: 'Quad.easeIn' });
+    const cam = this.cameras.main;
+    const swirl = this.add.image(at.x, at.y, kind === 'departure' ? 'exit-departure' : 'exit-portal').setDepth(8000).setScale(0.8);
+    this.travelFx.push(swirl);
+    this.fx.burst('portal', at.x, at.y, 24);
+    this.tweens.add({
+      targets: swirl,
+      scale: Math.max(cam.width, cam.height) / 40,
+      angle: 200,
+      duration: 700,
+      delay: 260,
+      ease: 'Quad.easeIn',
+      onComplete: () => {
+        cam.fadeOut(160, kind === 'departure' ? 60 : 30, kind === 'departure' ? 120 : 90, kind === 'departure' ? 160 : 30);
+        this.time.delayedCall(200, done);
+      },
+    });
+  }
+
+  /** Into Rick's ship: it lifts off, and a short sky shot shows it crossing to wherever's next. */
+  private shipTrip(exit: PropObj | null, done: () => void): void {
+    const p = this.player;
+    const cam = this.cameras.main;
+    this.tweens.add({ targets: p.sprite, alpha: 0, scale: 0.6, duration: 200 });
+    this.sfx('dash');
+    if (exit) this.tweens.add({ targets: exit.img, y: exit.img.y - 120, scale: 1.15, duration: 700, ease: 'Quad.easeIn' });
+    this.fx.burst('smoke', exit?.x ?? p.x, (exit?.y ?? p.y) + 10, 14);
+    this.time.delayedCall(exit ? 650 : 150, () => {
+      // The sky: a strip of night with stars, clouds, and the ship zooming across.
+      const W = cam.width;
+      const H = cam.height;
+      const sky = this.add.graphics().setScrollFactor(0).setDepth(9000);
+      sky.fillGradientStyle(0x0b1030, 0x0b1030, 0x2a2a5c, 0x2a2a5c, 1);
+      sky.fillRect(0, 0, W, H);
+      for (let i = 0; i < 60; i++) {
+        sky.fillStyle(0xffffff, 0.3 + ((i * 37) % 10) / 14);
+        sky.fillCircle((i * 211) % W, (i * 97) % (H * 0.7), 1 + (i % 3));
+      }
+      sky.fillStyle(0x3a3f6e, 1);
+      for (let i = 0; i < 7; i++) sky.fillEllipse(i * (W / 6), H - 30 + (i % 2) * 14, W / 4, 90);
+      const ship = this.add.image(-120, H * 0.5, 'flying-car-sky').setScrollFactor(0).setDepth(9001).setScale(1.4);
+      this.travelFx.push(sky, ship);
+      sky.setAlpha(0);
+      this.tweens.add({ targets: sky, alpha: 1, duration: 200 });
+      this.tweens.add({ targets: ship, x: W + 160, duration: 1500, ease: 'Sine.easeInOut' });
+      this.tweens.add({ targets: ship, y: H * 0.42, duration: 375, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
+      this.time.delayedCall(1450, () => {
+        cam.fadeOut(160, 11, 16, 48);
+        this.time.delayedCall(200, done);
+      });
+    });
+  }
+
+  private clearTravelFx(): void {
+    this.travelFx.forEach((o) => o.destroy());
+    this.travelFx = [];
+    this.traveling = false;
+    const cam = this.cameras.main;
+    cam.resetFX();
+    cam.setAlpha(1);
+    const s = this.player.sprite;
+    s.setScale(1).setAngle(0).setAlpha(1);
+    this.player.iframes = 0;
+  }
+
+  /** Arriving the way the story says: out of a portal, or the ship setting down. */
+  private arrive(kind: TravelKind): void {
+    const p = this.player;
+    const s = p.sprite;
+    if (kind === 'ship') {
+      const spot = { x: p.x + TILE * 1.6, y: p.y - 10 };
+      const ship = this.objects.addProp({ art: 'flying-car', x: spot.x, y: spot.y - 260, depth: spot.y });
+      this.tweens.add({ targets: ship.img, y: spot.y, duration: 700, ease: 'Bounce.easeOut', onComplete: () => this.fx.burst('smoke', spot.x, spot.y, 10) });
+      return;
+    }
+    const swirl = this.add.image(p.x, p.y - 20, kind === 'departure' ? 'exit-departure' : 'exit-portal').setDepth(s.depth - 1).setScale(0.1);
+    this.sfx('portal');
+    this.fx.burst('portal', p.x, p.y - 20, 18);
+    s.setScale(0.2);
+    this.tweens.add({ targets: swirl, scale: 0.9, duration: 220, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: s, scale: 1, duration: 320, delay: 120, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: swirl, scale: 0, alpha: 0, delay: 700, duration: 260, onComplete: () => swirl.destroy() });
   }
 
   finishRun(victory: boolean, quit = false): void {
@@ -1842,6 +2065,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.fx.hitStop(55);
     this.fx.burst('hit', p.x, p.y - 10, 8);
     runHook(this.sources(), 'onDamageTaken', this.ctx, halves, source);
+    this.rickSays('hurt', 0.4);
     this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'hurt', halves, source }));
     if (run.hp <= 0) {
       run.hp = 0;
@@ -2522,9 +2746,14 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const p = this.player;
     const side = p.x > view.widthPx / 2 ? -1 : 1;
     const target = { x: Phaser.Math.Clamp(p.x + side * 80, TILE * 1.5, view.widthPx - TILE * 1.5), y: Phaser.Math.Clamp(p.y, TILE * 1.5, view.heightPx - TILE * 1.5) };
-    const portal = act.rick.entrance === 'portal';
+    // Walking with Morty already? Then he just steps in from where he is.
+    const buddyAt = this.stage.position('rick');
+    const portal = !buddyAt && act.rick.entrance === 'portal';
     let start = target;
-    if (!portal) {
+    if (buddyAt) {
+      start = buddyAt;
+      this.stage.setActorVisible('rick', false);
+    } else if (!portal) {
       const door = [...view.doors].sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
       start = door ? { x: door.x, y: door.y } : { x: side < 0 ? TILE : view.widthPx - TILE, y: target.y };
     }
@@ -2538,10 +2767,11 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.sfx('portal');
     }
     const leave = () => {
+      const back = this.stage.position('rick') ?? start;
       this.tweens.add({
         targets: rick,
-        x: start.x,
-        y: start.y,
+        x: back.x,
+        y: back.y,
         scale: portal ? 0.1 : 1,
         duration: 300,
         onComplete: () => {
@@ -2549,6 +2779,11 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
           swirl?.destroy();
           this.actors.delete('rick');
           this.rickBusy = false;
+          // Back to walking along (and to his own speech bubbles).
+          if (buddyAt && this.stage.has('rick')) {
+            this.stage.setActorVisible('rick', true);
+            this.placeRickBuddy();
+          }
         },
       });
     };
@@ -2595,6 +2830,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.invalidateStats();
     this.syncCompanions();
     this.refreshLook();
+    if (!silent && item.kind !== 'weapon') this.after(1.2, () => this.rickSays('item', 0.6), false);
     if (!silent) {
       const kind = item.kind === 'active' ? 'Active item: right-click or C' : item.kind === 'consumable' ? 'Consumable: press R' : item.kind === 'weapon' ? 'Weapon' : 'Passive';
       this.hud.itemBanner(item.name, item.blurb, item.effect, kind);

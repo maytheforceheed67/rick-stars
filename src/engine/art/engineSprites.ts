@@ -255,6 +255,39 @@ export const ENGINE_SPRITES: SpriteArt[] = [
     draw: (g) => portalSwirl(g, 45, 55, 42, 52, 21),
   },
   {
+    // An official departure portal: a blue swirl in a metal frame with a sign on top.
+    key: 'exit-departure',
+    width: 104,
+    height: 122,
+    draw: (g, w, h) => {
+      wonkyRect(g, 4, 18, w - 8, h - 20, { fill: 0x56657a, seed: 31, radius: 12 });
+      blob(g, w / 2, h * 0.58, w * 0.36, h * 0.38, { fill: 0x2f6f8f, outline: 0x1d3f55, lineWidth: 3, seed: 32, wobble: 0.06 });
+      blob(g, w / 2, h * 0.58, w * 0.27, h * 0.29, { fill: 0x6fd0ff, outline: null, seed: 33, wobble: 0.08 });
+      blob(g, w / 2, h * 0.58, w * 0.13, h * 0.14, { fill: 0xd9f4ff, outline: null, seed: 34, wobble: 0.1 });
+      wonkyRect(g, 14, 0, w - 28, 20, { fill: 0xffd54a, seed: 35, radius: 4 });
+      g.lineStyle(3, INK, 1);
+      g.lineBetween(w * 0.3, 10, w * 0.62, 10);
+      g.lineBetween(w * 0.54, 4, w * 0.62, 10);
+      g.lineBetween(w * 0.54, 16, w * 0.62, 10);
+    },
+  },
+  {
+    // A security gate between finale stages: a scanner frame with a green light.
+    key: 'exit-gate',
+    width: 96,
+    height: 100,
+    draw: (g, w, h) => {
+      wonkyRect(g, 4, 6, 14, h - 8, { fill: 0x6b7a8f, seed: 41, radius: 3 });
+      wonkyRect(g, w - 18, 6, 14, h - 8, { fill: 0x6b7a8f, seed: 42, radius: 3 });
+      wonkyRect(g, 0, 0, w, 16, { fill: 0x56657a, seed: 43, radius: 4 });
+      g.fillStyle(0x0c0a14, 0.85);
+      g.fillRect(18, 16, w - 36, h - 18);
+      dot(g, w / 2, 8, 5, 0x97ce4c);
+      g.lineStyle(2, 0x97ce4c, 0.6);
+      for (let y = 26; y < h - 6; y += 12) g.lineBetween(20, y, w - 20, y);
+    },
+  },
+  {
     key: 'sign',
     width: 40,
     height: 46,
