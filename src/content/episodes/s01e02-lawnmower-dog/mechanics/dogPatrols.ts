@@ -1,6 +1,6 @@
 /**
  * Dog patrols (the second Jerry interlude). The Pilot's Suspicion mechanic, reused: dog troopers
- * stand guard in the calm streets and searchlights sweep the lawns. Jerry sneaks past with Shift.
+ * stand guard in the calm streets and searchlights light up the lawns. Jerry sneaks past with Shift.
  * If the meter fills, the dogs catch him; if he makes it through, they catch him at the end
  * anyway (it's canon).
  */

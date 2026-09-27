@@ -92,6 +92,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
   slowMult = 1;
   slowLeft = 0;
   spawnLeft: number;
+  /** Faded all the way in; from then on its alpha belongs to the content (a war suit powering down). */
+  private arrived = false;
   /** Elite twist, if any. */
   readonly mod: EliteMod | null;
   /** Hits a shielded elite's bubble still absorbs. */
@@ -390,7 +392,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite implements EnemySelf {
       this.syncVisuals(time);
       return 0;
     }
-    this.setAlpha(1);
+    if (!this.arrived) {
+      this.arrived = true;
+      this.setAlpha(1);
+    }
 
     if (this.poisonLeft > 0) {
       this.poisonLeft -= dt;

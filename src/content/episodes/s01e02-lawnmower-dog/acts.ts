@@ -237,6 +237,52 @@ export const SNOWBALL_WORLD: BiomeDef = {
   music: 'dog-snowball',
 };
 
+/** Dog-ruled Earth by day, outside the palace: tidy streets where the humans are the ones on leashes. */
+export const DOG_RULED_STREET: BiomeDef = {
+  id: 'dog-ruled-street',
+  style: { walls: 'bricks', blocks: 'hedge', doors: 'plain' },
+  name: 'The Dog-Ruled Streets',
+  palette: {
+    background: 0x16202a,
+    floor: 0xb9b4a6,
+    floorAlt: 0xaca799,
+    wall: 0x9a6b4f,
+    wallTop: 0xc98f5e,
+    block: 0x4f8a3a,
+    blockTop: 0x6fae4f,
+    cliff: 0x3a2a44,
+    cliffShadow: 0x1a1224,
+    slow: 0x8fd0ff,
+    accent: 0xf2c14e,
+    door: 0x6b4a36,
+  },
+  floorPattern: 'grid',
+  music: 'dog-snowball',
+};
+
+/** The park, where the dogs throw the sticks now. */
+export const DOG_RULED_PARK: BiomeDef = {
+  id: 'dog-ruled-park',
+  style: { walls: 'hills', blocks: 'hedge', doors: 'arch' },
+  name: 'The Dog-Ruled Park',
+  palette: {
+    background: 0x10200f,
+    floor: 0x8fc46a,
+    floorAlt: 0x84b862,
+    wall: 0x5f9a45,
+    wallTop: 0x7fbf5a,
+    block: 0x3a6f2a,
+    blockTop: 0x5a9a40,
+    cliff: 0x2f4a22,
+    cliffShadow: 0x152511,
+    slow: 0x8fd0ff,
+    accent: 0xf2c14e,
+    door: 0x6b4a36,
+  },
+  floorPattern: 'blobs',
+  music: 'dog-snowball',
+};
+
 // ---- the acts --------------------------------------------------------------------------------------
 
 export const PROLOGUE: ActDef = {
@@ -489,8 +535,9 @@ export const EPILOGUE: ActDef = {
     start: { x: 0, y: 0 },
     rooms: [
       { x: 0, y: 0, kind: 'start', template: 'dog-luxury-suite', script: 'dog-luxury-suite' },
-      { x: 1, y: 0, kind: 'combat', template: 'dog-ruled-street' },
-      { x: 2, y: 0, kind: 'combat', template: 'dog-ruled-park' },
+      // Out through the dog-ruled town, then back inside the palace.
+      { x: 1, y: 0, kind: 'combat', template: 'dog-ruled-street', biome: DOG_RULED_STREET },
+      { x: 2, y: 0, kind: 'combat', template: 'dog-ruled-park', biome: DOG_RULED_PARK },
       { x: 3, y: 0, kind: 'combat', template: 'dog-palace-hall' },
       { x: 4, y: 0, kind: 'finale', template: 'dog-throne-room' },
     ],

@@ -971,7 +971,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       inv.weapon = null;
       return;
     }
-    if (inv.weapon) return;
+    // Back from a quiet act with a weapon of his own due any second (Rick's tennis ball launcher):
+    // no digging an older one out of the bag first.
+    if (inv.weapon || run.act.weapon?.when === 'start') return;
     for (let i = index - 1; i >= 0; i--) {
       const w = run.sequence[i].weapon;
       if (w) {
