@@ -8,6 +8,7 @@ const w = (id: string, weight: number): Weighted => ({ id, weight });
 
 export const SMITH_NIGHT: BiomeDef = {
   id: 'smith-house-night',
+  style: { walls: 'house', blocks: 'furniture', doors: 'house' },
   name: 'The Smith House (night)',
   palette: {
     background: 0x0f0d1a,
@@ -29,6 +30,7 @@ export const SMITH_NIGHT: BiomeDef = {
 
 export const SCHOOL_BIOME: BiomeDef = {
   id: 'harry-herpson-high',
+  style: { walls: 'lockers', blocks: 'desk', doors: 'classroom' },
   name: 'Harry Herpson High',
   palette: {
     background: 0x1d1a2b,
@@ -50,6 +52,7 @@ export const SCHOOL_BIOME: BiomeDef = {
 
 export const C35_BIOME: BiomeDef = {
   id: 'dimension-35c',
+  style: { walls: 'hills', blocks: 'rock', doors: 'arch' },
   name: 'Dimension 35-C',
   palette: {
     background: 0x16262a,
@@ -71,6 +74,7 @@ export const C35_BIOME: BiomeDef = {
 
 export const CUSTOMS_BIOME: BiomeDef = {
   id: 'interdimensional-customs',
+  style: { walls: 'panels', blocks: 'counter', doors: 'gate' },
   name: 'Interdimensional Customs',
   palette: {
     background: 0x10131c,
@@ -92,6 +96,7 @@ export const CUSTOMS_BIOME: BiomeDef = {
 
 export const SMITH_DAY: BiomeDef = {
   id: 'smith-house-day',
+  style: { walls: 'house', blocks: 'furniture', doors: 'house' },
   name: 'The Smith House',
   palette: {
     background: 0x2a2233,

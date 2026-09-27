@@ -59,6 +59,11 @@ export class DoorView {
   private draw(): void {
     const g = this.gfx;
     g.clear();
+    const style = this.room.biome.style?.doors ?? 'plain';
+    if (style !== 'plain') {
+      this.drawStyled(g, style);
+      return;
+    }
     const accent = DOOR_COLORS[this.spec.targetKind] ?? this.room.biome.palette.door;
     const horizontal = this.spec.dir === 'N' || this.spec.dir === 'S';
     const w = horizontal ? TILE * 1.1 : TILE * 0.9;
@@ -86,6 +91,111 @@ export class DoorView {
       g.fillStyle(INK, 1);
       g.fillCircle(this.x - 3, this.y - 3, 2.2);
       g.fillCircle(this.x + 3, this.y - 3, 2.2);
+    }
+  }
+
+  /**
+   * Doors that belong to the place: classroom doors, rock archways, security gates, house doors.
+   * A light over the door still says what's through it (treasure, shop, special room, finale).
+   */
+  private drawStyled(g: Phaser.GameObjects.Graphics, style: 'classroom' | 'arch' | 'gate' | 'house'): void {
+    const p = this.room.biome.palette;
+    const x = this.x;
+    const y = this.y;
+    const horizontal = this.spec.dir === 'N' || this.spec.dir === 'S';
+    const w = horizontal ? TILE * 1.05 : TILE * 0.85;
+    const h = horizontal ? TILE * 0.85 : TILE * 1.05;
+    const left = x - w / 2;
+    const top = y - h / 2;
+    switch (style) {
+      case 'classroom':
+      case 'house': {
+        const wood = style === 'classroom' ? 0x9c6a3e : 0xf4efe6;
+        g.fillStyle(shade(wood, -0.25), 1);
+        g.fillRoundedRect(left - 6, top - 6, w + 12, h + 12, 6);
+        g.fillStyle(0x0c0a14, 1);
+        g.fillRect(left, top, w, h);
+        if (!this.open) {
+          // The door, shut: panels, a knob, and (at school) a little window.
+          g.fillStyle(wood, 1);
+          g.fillRect(left + 2, top + 2, w - 4, h - 4);
+          g.lineStyle(2, shade(wood, -0.35), 1);
+          g.strokeRect(left + 8, top + 8, w - 16, h - 16);
+          if (style === 'classroom') {
+            g.fillStyle(0xbfe6f7, 1);
+            g.fillRect(x - 9, top + 10, 18, 12);
+          }
+          g.fillStyle(0xffd54a, 1);
+          g.fillCircle(horizontal ? left + w - 10 : x, horizontal ? y + 4 : top + h - 10, 3.5);
+        } else {
+          // Swung open against the frame.
+          g.fillStyle(wood, 1);
+          if (horizontal) g.fillRect(left - 4, top, 8, h);
+          else g.fillRect(left, top - 4, w, 8);
+        }
+        g.lineStyle(3, INK, 1);
+        g.strokeRoundedRect(left - 6, top - 6, w + 12, h + 12, 6);
+        break;
+      }
+      case 'arch': {
+        // A lumpy rock arch; shut, it's grown over with goo.
+        g.fillStyle(p.wall, 1);
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 6) * Math.PI;
+          const rx = horizontal ? Math.cos(a) * (w / 2 + 6) : 0;
+          const ry = horizontal ? 0 : Math.cos(a) * (h / 2 + 6);
+          g.fillCircle(x + rx + (horizontal ? 0 : Math.sin(a) * 4), y + ry + (horizontal ? Math.sin(a) * 4 : 0), 13);
+        }
+        g.fillStyle(0x0c0a14, 1);
+        g.fillEllipse(x, y, w * 0.9, h * 0.9);
+        if (!this.open) {
+          g.fillStyle(p.slow, 1);
+          g.fillEllipse(x, y, w * 0.86, h * 0.86);
+          g.fillStyle(shade(p.slow, 0.3), 1);
+          g.fillCircle(x - 8, y - 6, 5);
+          g.fillCircle(x + 7, y + 5, 3.5);
+        }
+        g.lineStyle(3, INK, 1);
+        g.strokeEllipse(x, y, w * 0.9, h * 0.9);
+        break;
+      }
+      case 'gate': {
+        // A security gate: metal posts, a scanner light, laser bars when it's locked.
+        g.fillStyle(0x56657a, 1);
+        g.fillRoundedRect(left - 7, top - 7, w + 14, h + 14, 5);
+        g.fillStyle(0x0c0a14, 1);
+        g.fillRect(left, top, w, h);
+        g.lineStyle(3, INK, 1);
+        g.strokeRoundedRect(left - 7, top - 7, w + 14, h + 14, 5);
+        if (!this.open) {
+          g.lineStyle(3, 0xff4a5a, 0.95);
+          for (let i = 1; i <= 3; i++) {
+            if (horizontal) g.lineBetween(left + (w * i) / 4, top + 3, left + (w * i) / 4, top + h - 3);
+            else g.lineBetween(left + 3, top + (h * i) / 4, left + w - 3, top + (h * i) / 4);
+          }
+        }
+        g.fillStyle(this.open ? 0x97ce4c : 0xff4a5a, 1);
+        g.fillCircle(horizontal ? x : left - 1, horizontal ? top - 1 : y, 4);
+        break;
+      }
+    }
+    const accent = DOOR_COLORS[this.spec.targetKind];
+    if (accent !== undefined) {
+      // A colored light by the door for special rooms, and the skull for the finale.
+      const lx = horizontal ? x + w / 2 + 12 : x + (this.spec.dir === 'W' ? 18 : -18);
+      const ly = horizontal ? y + (this.spec.dir === 'N' ? 18 : -18) : y - h / 2 - 12;
+      g.fillStyle(accent, 1);
+      g.fillCircle(lx, ly, 7);
+      g.lineStyle(2, INK, 1);
+      g.strokeCircle(lx, ly, 7);
+    }
+    if (this.spec.targetKind === 'finale') {
+      g.fillStyle(0xf4efe6, 1);
+      g.fillCircle(x, y - 2, 8);
+      g.fillRect(x - 5, y + 3, 10, 6);
+      g.fillStyle(INK, 1);
+      g.fillCircle(x - 3, y - 3, 2.2);
+      g.fillCircle(x + 3, y - 3, 2.2);
     }
   }
 
@@ -281,6 +391,12 @@ export class RoomView {
   }
 
   private paintBlock(g: Phaser.GameObjects.Graphics, c: number, r: number, tall: boolean): void {
+    const style = this.biome.style;
+    const kind = tall ? style?.walls : style?.blocks;
+    if (kind && kind !== 'bricks' && kind !== 'crate') {
+      this.paintStyledBlock(g, c, r, tall, kind);
+      return;
+    }
     const p = this.biome.palette;
     const x = (c + 1) * TILE;
     const y = (r + 1) * TILE;
@@ -301,7 +417,110 @@ export class RoomView {
     g.fillRoundedRect(x + inset + 5, y + inset - lift + 4, TILE * 0.35, 5, 2);
   }
 
+  /** Furniture and pillars that look like the place: desks, lockers, rocks, counters. */
+  private paintStyledBlock(g: Phaser.GameObjects.Graphics, c: number, r: number, tall: boolean, kind: string): void {
+    const p = this.biome.palette;
+    const x = (c + 1) * TILE;
+    const y = (r + 1) * TILE;
+    const k = c * 17 + r * 31;
+    g.fillStyle(0x000000, 0.22);
+    g.fillEllipse(x + TILE / 2, y + TILE - 3, TILE * 0.95, 12);
+    switch (kind) {
+      case 'lockers': {
+        // A bank of two lockers.
+        for (let i = 0; i < 2; i++) {
+          const lx = x + 4 + i * (TILE / 2 - 4);
+          g.fillStyle(i ? shade(p.wall, 0.08) : p.wall, 1);
+          g.fillRect(lx, y - 14, TILE / 2 - 4, TILE + 8);
+          g.lineStyle(2, INK, 1);
+          g.strokeRect(lx, y - 14, TILE / 2 - 4, TILE + 8);
+          g.lineStyle(2, shade(p.wall, -0.35), 1);
+          for (let v = 0; v < 3; v++) g.lineBetween(lx + 6, y - 6 + v * 5, lx + TILE / 2 - 10, y - 6 + v * 5);
+          g.fillStyle(0xdfe6ee, 1);
+          g.fillRect(lx + TILE / 2 - 12, y + 16, 4, 10);
+        }
+        g.fillStyle(p.wallTop, 1);
+        g.fillRect(x + 4, y - 20, TILE - 8, 7);
+        break;
+      }
+      case 'hills': {
+        // A lumpy pastel mound.
+        g.fillStyle(p.wall, 1);
+        g.fillEllipse(x + TILE / 2, y + TILE * 0.5, TILE * 1.02, TILE * 0.95);
+        g.fillStyle(p.wallTop, 1);
+        g.fillEllipse(x + TILE / 2 + jitter(k, 1) * 5, y + TILE * 0.32, TILE * 0.8, TILE * 0.55);
+        g.fillStyle(0xffffff, 0.25);
+        g.fillEllipse(x + TILE * 0.36, y + TILE * 0.24, 14, 7);
+        g.lineStyle(3, INK, 1);
+        g.strokeEllipse(x + TILE / 2, y + TILE * 0.5, TILE * 1.02, TILE * 0.95);
+        break;
+      }
+      case 'panels':
+      case 'counter': {
+        // A grey kiosk or counter with a lit stripe.
+        const lift = tall ? 16 : 8;
+        g.fillStyle(p.wall, 1);
+        g.fillRoundedRect(x + 4, y + 4 - lift, TILE - 8, TILE - 6 + lift, 4);
+        g.fillStyle(p.wallTop, 1);
+        g.fillRoundedRect(x + 4, y + 4 - lift, TILE - 8, TILE * 0.4, 4);
+        g.fillStyle(p.accent, 0.9);
+        g.fillRect(x + 8, y + TILE * 0.52, TILE - 16, 4);
+        g.lineStyle(3, INK, 1);
+        g.strokeRoundedRect(x + 4, y + 4 - lift, TILE - 8, TILE - 6 + lift, 4);
+        break;
+      }
+      case 'desk': {
+        // A school desk: a wooden top on metal legs, with a book on it now and then.
+        g.lineStyle(3, 0x5a5a6e, 1);
+        g.lineBetween(x + 12, y + 30, x + 12, y + TILE - 6);
+        g.lineBetween(x + TILE - 12, y + 30, x + TILE - 12, y + TILE - 6);
+        g.fillStyle(p.block, 1);
+        g.fillRoundedRect(x + 5, y + 12, TILE - 10, 22, 5);
+        g.fillStyle(p.blockTop, 1);
+        g.fillRoundedRect(x + 5, y + 8, TILE - 10, 16, 5);
+        g.lineStyle(3, INK, 1);
+        g.strokeRoundedRect(x + 5, y + 8, TILE - 10, 26, 5);
+        if (jitter(k, 2) > 0.3) {
+          g.fillStyle([0xe0484d, 0x3f6fb5, 0x97ce4c][Math.abs(Math.round(jitter(k, 3) * 2))], 1);
+          g.fillRect(x + 18, y + 11, 16, 9);
+        }
+        break;
+      }
+      case 'rock': {
+        g.fillStyle(p.block, 1);
+        g.fillEllipse(x + TILE / 2, y + TILE * 0.6, TILE * 0.9, TILE * 0.7);
+        g.fillStyle(p.blockTop, 1);
+        g.fillEllipse(x + TILE / 2 + jitter(k, 4) * 4, y + TILE * 0.46, TILE * 0.66, TILE * 0.42);
+        g.lineStyle(3, INK, 1);
+        g.strokeEllipse(x + TILE / 2, y + TILE * 0.6, TILE * 0.9, TILE * 0.7);
+        break;
+      }
+      case 'house':
+      case 'furniture': {
+        // A cabinet or a stack of boxes.
+        const lift = tall ? 14 : 6;
+        g.fillStyle(p.block, 1);
+        g.fillRoundedRect(x + 6, y + 6 - lift, TILE - 12, TILE - 8 + lift, 5);
+        g.fillStyle(p.blockTop, 1);
+        g.fillRoundedRect(x + 6, y + 6 - lift, TILE - 12, 12, 5);
+        g.lineStyle(2, shade(p.block, -0.35), 1);
+        g.lineBetween(x + TILE / 2, y + 12 - lift + 6, x + TILE / 2, y + TILE - 6);
+        g.fillStyle(0xffd54a, 1);
+        g.fillCircle(x + TILE / 2 - 5, y + TILE / 2, 2.5);
+        g.fillCircle(x + TILE / 2 + 5, y + TILE / 2, 2.5);
+        g.lineStyle(3, INK, 1);
+        g.strokeRoundedRect(x + 6, y + 6 - lift, TILE - 12, TILE - 8 + lift, 5);
+        break;
+      }
+    }
+  }
+
   private paintWalls(g: Phaser.GameObjects.Graphics, gaps: Set<string>): void {
+    const walls = this.biome.style?.walls ?? 'bricks';
+    if (walls !== 'bricks') {
+      this.paintStyledWalls(g, gaps, walls);
+      return;
+    }
     const p = this.biome.palette;
     const W = this.widthPx;
     const H = this.heightPx;
@@ -329,6 +548,107 @@ export class RoomView {
     g.strokeRect(TILE, TILE, W - TILE * 2, H - TILE * 2);
     g.strokeRect(2, 2, W - 4, H - 4);
     // Carve door gaps back out of the wall art.
+    for (const key of gaps) {
+      const [tc, tr] = key.split(',').map(Number);
+      g.fillStyle(0x0c0a14, 1);
+      g.fillRect(tc * TILE, tr * TILE, TILE, TILE);
+    }
+  }
+
+  /** Walls that look like the place: lockers, lumpy hills, metal panels, wallpaper. */
+  private paintStyledWalls(g: Phaser.GameObjects.Graphics, gaps: Set<string>, walls: 'lockers' | 'hills' | 'panels' | 'house'): void {
+    const p = this.biome.palette;
+    const W = this.widthPx;
+    const H = this.heightPx;
+    g.fillStyle(p.wall, 1);
+    g.fillRect(0, 0, W, TILE);
+    g.fillRect(0, H - TILE, W, TILE);
+    g.fillRect(0, 0, TILE, H);
+    g.fillRect(W - TILE, 0, TILE, H);
+    switch (walls) {
+      case 'lockers': {
+        // A row of lockers along the top wall; painted cinder block on the other sides.
+        const lw = TILE / 2;
+        for (let x = TILE; x < W - TILE; x += lw) {
+          const i = Math.round(x / lw);
+          g.fillStyle(i % 2 ? p.wall : shade(p.wall, 0.07), 1);
+          g.fillRect(x + 1, 4, lw - 2, TILE - 6);
+          g.lineStyle(2, shade(p.wall, -0.35), 1);
+          for (let v = 0; v < 3; v++) g.lineBetween(x + 6, 12 + v * 5, x + lw - 6, 12 + v * 5);
+          g.fillStyle(0xdfe6ee, 1);
+          g.fillRect(x + lw - 9, TILE * 0.55, 3, 9);
+          g.lineStyle(2, INK, 0.8);
+          g.strokeRect(x + 1, 4, lw - 2, TILE - 6);
+        }
+        g.fillStyle(p.wallTop, 1);
+        g.fillRect(0, 0, W, 5);
+        g.lineStyle(2, shade(p.wall, -0.2), 1);
+        for (let y = TILE; y < H; y += TILE / 3) {
+          g.lineBetween(0, y, TILE, y);
+          g.lineBetween(W - TILE, y, W, y);
+        }
+        for (let x = 0; x < W; x += TILE / 2) g.lineBetween(x, H - TILE, x, H);
+        break;
+      }
+      case 'hills': {
+        // Lumpy pastel hills all the way around.
+        const hump = (cx: number, cy: number, rx: number, ry: number) => {
+          g.fillStyle(p.wallTop, 1);
+          g.fillEllipse(cx, cy, rx, ry);
+          g.fillStyle(0xffffff, 0.18);
+          g.fillEllipse(cx - rx * 0.18, cy - ry * 0.18, rx * 0.35, ry * 0.25);
+        };
+        for (let x = 0; x < W + TILE; x += TILE * 0.8) {
+          const j = jitter(x, 1) * 8;
+          hump(x, TILE * 0.45 + j, TILE * 1.1, TILE * 0.9);
+          hump(x + TILE * 0.3, H - TILE * 0.4 + j, TILE * 1.1, TILE * 0.8);
+        }
+        for (let y = 0; y < H + TILE; y += TILE * 0.8) {
+          const j = jitter(y, 2) * 8;
+          hump(TILE * 0.4 + j, y, TILE * 0.9, TILE * 1.1);
+          hump(W - TILE * 0.4 + j, y + TILE * 0.3, TILE * 0.9, TILE * 1.1);
+        }
+        break;
+      }
+      case 'panels': {
+        // Grey bureaucracy: metal panels with rivets and a hazard stripe at the bottom of the wall.
+        for (let x = 0; x < W; x += TILE) {
+          g.fillStyle(x % (TILE * 2) ? p.wall : shade(p.wall, 0.06), 1);
+          g.fillRect(x + 1, 1, TILE - 2, TILE - 12);
+          g.fillStyle(shade(p.wall, 0.25), 1);
+          for (const [dx, dy] of [[5, 5], [TILE - 7, 5]]) g.fillCircle(x + dx, dy, 2);
+        }
+        for (let x = TILE; x < W - TILE; x += 16) {
+          g.fillStyle(Math.round(x / 16) % 2 ? 0xffd54a : 0x1a1424, 1);
+          g.fillRect(x, TILE - 11, 16, 7);
+        }
+        g.lineStyle(2, shade(p.wall, -0.3), 1);
+        for (let y = TILE; y < H; y += TILE) {
+          g.lineBetween(0, y, TILE, y);
+          g.lineBetween(W - TILE, y, W, y);
+        }
+        break;
+      }
+      case 'house': {
+        // Wallpaper stripes with a baseboard, and a picture frame here and there.
+        for (let x = 0; x < W; x += 12) {
+          g.fillStyle(Math.round(x / 12) % 2 ? p.wall : shade(p.wall, 0.06), 1);
+          g.fillRect(x, 0, 12, TILE);
+        }
+        g.fillStyle(p.wallTop, 1);
+        g.fillRect(TILE, TILE - 10, W - TILE * 2, 8);
+        for (let x = TILE * 2; x < W - TILE * 2; x += TILE * 4) {
+          g.fillStyle(0x8b5a2b, 1);
+          g.fillRect(x, 10, 34, 26);
+          g.fillStyle([0x9fc9f0, 0xf2c14e, 0x97ce4c][Math.round(x / TILE) % 3], 1);
+          g.fillRect(x + 4, 14, 26, 18);
+        }
+        break;
+      }
+    }
+    g.lineStyle(4, INK, 1);
+    g.strokeRect(TILE, TILE, W - TILE * 2, H - TILE * 2);
+    g.strokeRect(2, 2, W - 4, H - 4);
     for (const key of gaps) {
       const [tc, tr] = key.split(',').map(Number);
       g.fillStyle(0x0c0a14, 1);
