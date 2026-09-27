@@ -1923,7 +1923,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.clearTravelFx();
       this.player.setControlLocked(false);
       this.enterRoom(target.id);
-      this.arrive(by);
+      // The ship parks outside; stepping out of a portal is worth showing.
+      if (by === 'ship') this.cameras.main.fadeIn(350);
+      else this.arrive(by);
     });
   }
 
@@ -2118,12 +2120,13 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'dash' }));
   }
 
-  damagePlayer(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): void {
-    if (this.dead || this.ended || halves <= 0 || this.godModeOn || this.stage.running) return;
+  /** Hurts Morty. Returns whether the hit landed (not dodged, not during invulnerability). */
+  damagePlayer(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): boolean {
+    if (this.dead || this.ended || halves <= 0 || this.godModeOn || this.stage.running) return false;
     const p = this.player;
     if (!opts?.ignoreInvulnerability && p.isInvulnerable) {
       if (p.inPerfectWindow) this.perfectDodge();
-      return;
+      return false;
     }
     const run = this.run;
     const dodge = this.stats().dodgeChance;
@@ -2133,7 +2136,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.fx.floatText(p.x, p.y - 64, 'MISSED!', '#ffd54a', 18);
       this.fx.pop(p.x, p.y - 20, 'fx-star', 0xffd54a, 0.8, 2.4, 260);
       this.sfx('whiff');
-      return;
+      return false;
     }
     run.hp -= halves;
     run.lastDamageSource = source;
@@ -2151,6 +2154,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       run.hp = 0;
       this.onDeath();
     }
+    return true;
   }
 
   healPlayer(halves: number): void {

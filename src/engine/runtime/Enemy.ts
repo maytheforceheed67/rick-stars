@@ -46,7 +46,8 @@ export interface EnemyHost {
   spawnEnemy(id: string, x: number, y: number, opts?: SpawnOpts): Enemy | null;
   /** Hostile enemies near a point (not hazards or calm NPCs). */
   enemiesNear(x: number, y: number, radius: number): Enemy[];
-  damagePlayer(halves: number, source: string): void;
+  /** Returns whether the hit landed. */
+  damagePlayer(halves: number, source: string): boolean;
   /** Morty falls if he's within `radius` of (x, y) and nothing lets him stand there. */
   pitfall(x: number, y: number, radius: number): void;
   sfx(id: string): void;
@@ -620,7 +621,8 @@ function makeApi(e: Enemy, host: EnemyHost): EnemyApi {
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
         if (Math.abs(diff) > spec.spread / 2 && d > host.player.radius * 1.5) return false;
       }
-      host.damagePlayer(spec.damage, e.def.name);
+      // Only a hit that lands shoves him (no piling up shoves while he's invulnerable).
+      if (!host.damagePlayer(spec.damage, e.def.name)) return false;
       if (spec.knockback) host.player.knockback(Math.atan2(dy, dx), spec.knockback);
       return true;
     },

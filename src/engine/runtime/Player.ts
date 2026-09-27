@@ -10,6 +10,9 @@ import type { Rng } from '../rng';
 import type { Settings } from '../save/save';
 import type { PlayerRef, StatusFlags, TileKind } from '../types';
 
+
+/** Top speed of a knockback, in pixels per second. */
+const MAX_KNOCK = 900;
 export interface PlayerInput {
   moveX: number;
   moveY: number;
@@ -30,7 +33,7 @@ export interface PlayerHost {
   armed(): boolean;
   onFire(angle: number): void;
   onDash(): void;
-  damagePlayer(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): void;
+  damagePlayer(halves: number, source: string, opts?: { ignoreInvulnerability?: boolean }): boolean;
   healPlayer(halves: number): void;
   hp(): number;
   maxHp(): number;
@@ -134,6 +137,12 @@ export class Player implements PlayerRef {
   knockback(angle: number, force: number): void {
     this.knockVx += Math.cos(angle) * force;
     this.knockVy += Math.sin(angle) * force;
+    // However the shoves pile up, never fast enough to punch through a wall.
+    const k = Math.hypot(this.knockVx, this.knockVy);
+    if (k > MAX_KNOCK) {
+      this.knockVx *= MAX_KNOCK / k;
+      this.knockVy *= MAX_KNOCK / k;
+    }
   }
 
   setPosition(x: number, y: number): void {
