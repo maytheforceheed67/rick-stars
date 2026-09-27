@@ -386,6 +386,12 @@ export function validateRegistry(reg: Registry): string[] {
     if (item.kind === 'active' && !item.active) err(`item "${item.id}" is active but has no active use`);
     if (item.kind === 'consumable' && !item.consumable) err(`item "${item.id}" is a consumable but has no use`);
     if (item.kind === 'weapon' && !item.weapon) err(`item "${item.id}" is a weapon but has no weapon spec`);
+    const w = item.weapon;
+    if (w?.held && !artExists(w.held)) err(`item "${item.id}": held sprite "${w.held}" doesn't exist`);
+    for (const shot of typeof w?.shot === 'string' ? [w.shot] : (w?.shot ?? [])) {
+      if (!artExists(shot)) err(`item "${item.id}": shot sprite "${shot}" doesn't exist`);
+    }
+    if (w?.flash !== undefined && !(w.flash > 0)) err(`item "${item.id}": muzzle flash size must be positive`);
     if (!(item.price >= 0)) err(`item "${item.id}" needs a price`);
   }
   for (const e of reg.enemies.values()) {

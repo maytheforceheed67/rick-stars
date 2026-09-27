@@ -42,6 +42,11 @@ export interface ProjectileOpts {
   charged?: boolean;
   /** An enemy (uid) this shot can't hit, e.g. the one a split shot burst out of. */
   ignore?: number;
+  /**
+   * Drawn this far above where it is: a shot fired at chest height flies over its floor point,
+   * which is what hits walls and enemies (x, y), like a shadow.
+   */
+  lift?: number;
 }
 
 export class Projectile {
@@ -69,6 +74,8 @@ export class Projectile {
   crit = false;
   freezes = false;
   charged = false;
+  /** Drawn this far above its floor point (see ProjectileOpts.lift). */
+  lift = 0;
   /** Enemies already hit, so a piercing shot never hits the same one twice. */
   readonly hits = new Set<number>();
   /** How it was launched (split shots copy their parent's look). */
@@ -82,9 +89,15 @@ export class Projectile {
     if (glow) this.glow = scene.add.image(0, 0, 'fx-dot').setVisible(false).setDepth(depth - 1).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.55);
   }
 
-  /** Keeps the halo on the shot. */
+  /** Where it's drawn (its floor point, lifted). */
+  get drawY(): number {
+    return this.y - this.lift;
+  }
+
+  /** Keeps the picture (and its halo) on the shot. */
   syncGlow(): void {
-    this.glow?.setPosition(this.x, this.y);
+    this.img.setPosition(this.x, this.drawY);
+    this.glow?.setPosition(this.x, this.drawY);
   }
 
   launch(o: ProjectileOpts): void {
@@ -113,15 +126,16 @@ export class Projectile {
     this.crit = !!o.crit;
     this.freezes = !!o.freezes;
     this.charged = !!o.charged;
+    this.lift = o.lift ?? 0;
     this.hits.clear();
     if (o.ignore !== undefined) this.hits.add(o.ignore);
     const scale = o.radius / (o.baseRadius ?? 8);
-    this.img.setTexture(o.texture).setScale(scale).setPosition(o.x, o.y).setVisible(true).setActive(true).setAlpha(1);
+    this.img.setTexture(o.texture).setScale(scale).setPosition(o.x, o.y - this.lift).setVisible(true).setActive(true).setAlpha(1);
     if (o.tint !== undefined) this.img.setTint(o.tint);
     else this.img.clearTint();
     this.img.setRotation(this.spin || this.upright ? 0 : o.angle).setFlipX(this.upright && Math.cos(o.angle) < 0);
     if (this.glow) {
-      this.glow.setPosition(o.x, o.y).setScale((o.radius * 3.4) / 8).setVisible(true).setTint(o.glow ?? o.tint ?? 0xffffff);
+      this.glow.setPosition(o.x, o.y - this.lift).setScale((o.radius * 3.4) / 8).setVisible(true).setTint(o.glow ?? o.tint ?? 0xffffff);
     }
   }
 
@@ -208,7 +222,6 @@ export class ProjectilePool {
       }
       p.x = nx;
       p.y = ny;
-      p.img.setPosition(p.x, p.y);
       p.syncGlow();
       if (p.spin) p.img.angle += p.spin * dt;
       else if (p.upright) p.img.setFlipX(p.vx < 0);

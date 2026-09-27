@@ -338,6 +338,8 @@ export const guard: EnemyDef = {
   radius: 14,
   contactDamage: 1,
   art: ART.guard,
+  // The tip of its gun, as drawn.
+  muzzle: { x: 25, y: -10 },
   nameplate: agentNameplate,
   elite: { hpMult: 2, scale: 1.2, params: { burst: 5 } },
   brain: function* (api: EnemyApi): Brain {
@@ -411,6 +413,8 @@ export const sniper: EnemyDef = {
   radius: 13,
   contactDamage: 1,
   art: ART.sniper,
+  // The tip of its gun, as drawn.
+  muzzle: { x: 22, y: -11 },
   nameplate: agentNameplate,
   elite: { hpMult: 2.6, scale: 1.2, params: { shots: 2 } },
   brain: function* (api: EnemyApi): Brain {

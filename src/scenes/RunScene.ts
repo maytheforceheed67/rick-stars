@@ -4,7 +4,7 @@
  * The engine never special-cases an episode: everything episode-specific comes in as content.
  */
 import Phaser from 'phaser';
-import { BASE_STATS, ECONOMY, ENEMIES, PLAYER, RICK_METER, ROOMS, SHOTS, STAT_LIMITS } from '../content/balance';
+import { BASE_STATS, ECONOMY, ENEMIES, FEEL, PLAYER, RICK_METER, ROOMS, SHOTS, STAT_LIMITS } from '../content/balance';
 import { bakeArt, TEXTURE_PAD } from '../engine/art/textures';
 import { GAME_HEIGHT, GAME_WIDTH, HUD_HEIGHT, TILE } from '../engine/constants';
 import { buildFixedFloor, generateFloor, regionOf, type FloorConfig, type FloorRoom } from '../engine/dungeon/generate';
@@ -17,6 +17,7 @@ import { enemyPoolFor, itemPoolFor, type ItemFilter } from '../engine/pools';
 import type { Registry } from '../engine/registry';
 import type { Rng } from '../engine/rng';
 import { freshRoomState, RunState, type PedestalState, type RoomState } from '../engine/run/RunState';
+import { clearMuzzle } from '../engine/runtime/aim';
 import { Companion, Orbiters, type CompanionHost } from '../engine/runtime/Companion';
 import { Enemy, type EnemyHost, type SpawnOpts } from '../engine/runtime/Enemy';
 import { Fx, type BurstStyle } from '../engine/runtime/Fx';
@@ -134,6 +135,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private colliders: Phaser.Physics.Arcade.Collider[] = [];
   private mechanics: { def: MechanicDef; inst: MechanicInstance }[] = [];
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
+  /** A click (or arrow-key press) that hasn't reached the trigger yet; never dropped, even mid hit-stop. */
+  private firePressed = false;
   private frameDelta = 0;
   private statsCache: StatBlock | null = null;
   private sourcesCache: HookSource[] | null = null;
@@ -202,6 +205,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private chargeRing: Phaser.GameObjects.Arc | null = null;
   /** What Morty looks like right now (items and transformations), and its pieces. */
   private lookKey = '';
+  /** Who's holding what, last time the weapon in his hand was set up. */
+  private heldKey = '';
   private look: LookSpec = {};
   private accessory: Phaser.GameObjects.Image | null = null;
   private trailTimer = 0;
@@ -314,6 +319,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.fx = new Fx(this, () => this.settings());
     this.objects = new WorldObjects(this);
     this.player = new Player(this, this, this.playerTexture(), 0, 0);
+    // After the player's own view is placed each frame: what rides on him (his hat).
+    this.events.on(Phaser.Scenes.Events.POST_UPDATE, this.rideAlong, this);
     this.stage = this.makeStage();
     this.orbiters = new Orbiters(this.companionHost());
     this.ctx = this.buildCtx();
@@ -348,6 +355,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   private cleanup(): void {
     // Phaser tears down this scene's objects itself; this just releases what it doesn't know about.
+    this.events.off(Phaser.Scenes.Events.POST_UPDATE, this.rideAlong, this);
     this.companions.forEach((c) => c.destroy());
     this.companions = [];
     this.orbiters?.destroy();
@@ -697,11 +705,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.chargeRing.destroy();
       this.chargeRing = null;
     }
-    const s = p.sprite;
-    if (this.accessory) {
-      const top = s.y - s.displayHeight * s.originY + TEXTURE_PAD;
-      this.accessory.setPosition(s.x, top + (this.look.dy ?? 0)).setDepth(s.depth + 1).setFlipX(s.flipX).setAlpha(s.alpha).setVisible(p.falling <= 0);
-    }
+    this.syncHeld();
+    const s = p.view;
     if (this.look.trail !== undefined && p.moving) {
       this.trailTimer -= dt;
       if (this.trailTimer <= 0) {
@@ -710,6 +715,48 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
         this.fx.pop(s.x + wobble, s.y + 10, 'fx-dot', this.look.trail, 0.8, 0.1, 450);
       }
     }
+  }
+
+  /** Keeps the weapon in his hand in step with what he's holding and who he is. */
+  private syncHeld(): void {
+    const p = this.player;
+    const run = this.run;
+    const wid = run.inventory.weapon;
+    const key = `${run.act.playable}|${wid ?? ''}|${this.lookKey}`;
+    if (key === this.heldKey) return;
+    this.heldKey = key;
+    const ch = this.reg.characters.get(run.act.playable);
+    p.held.setCharacter(ch?.holds);
+    const w = wid ? this.reg.items.get(wid)?.weapon : undefined;
+    p.held.setWeapon(w ?? null);
+    // The arm is his sleeve, so a Garage shirt or an item's look recolors it too.
+    if (ch?.recolor && ch.holds) {
+      const shirt = svc().save.shirt;
+      const garage = shirt && this.textures.exists(`${ch.sprite?.key}-${shirt}`) ? this.reg.upgrades.get(shirt)?.shirt : undefined;
+      p.held.setSleeve(this.look.shirt ?? garage ?? ch.holds.sleeve);
+    }
+    // A thrown weapon: the next thing in the pile is what's in his hand.
+    const looks = w ? (typeof w.shot === 'string' ? [w.shot] : (w.shot ?? [])) : [];
+    p.held.nextThrown = () => (looks.length ? looks[this.shotsFired % looks.length] : null);
+  }
+
+  /** Things that ride on Morty, placed after his view each frame: an item's hat or helmet. */
+  private rideAlong(): void {
+    const p = this.player;
+    if (!this.accessory || !p) return;
+    const v = p.view;
+    const top = v.y - v.displayHeight * v.originY + TEXTURE_PAD + (this.look.dy ?? 0);
+    // Tilt with him, around his feet.
+    const r = v.rotation;
+    const dy = top - v.y;
+    this.accessory
+      .setPosition(v.x - Math.sin(r) * dy, v.y + Math.cos(r) * dy)
+      .setRotation(r)
+      .setDepth(v.depth + 1)
+      .setFlipX(v.flipX)
+      .setAlpha(v.alpha)
+      .setScale(v.scaleX, v.scaleY)
+      .setVisible(p.falling <= 0 && v.visible);
   }
 
   private showMarker(art: string, x: number, y: number, seconds: number): void {
@@ -741,7 +788,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (this.stage.running) this.stage.skip();
       else if (p.rightButtonDown() && !this.dead && !this.player.controlLocked) this.useActive();
+      else if (p.leftButtonDown()) this.firePressed = true;
     });
+    for (const k of ['UP', 'DOWN', 'LEFT', 'RIGHT']) this.keys[k].on('down', () => (this.firePressed = true));
   }
 
   private readInput(): PlayerInput {
@@ -752,15 +801,15 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const ay = (k.DOWN.isDown ? 1 : 0) - (k.UP.isDown ? 1 : 0);
     const p = this.input.activePointer;
     const world = this.cameras.main.getWorldPoint(p.x, p.y);
-    let aimX = world.x;
-    let aimY = world.y;
     let fire = p.leftButtonDown();
+    let aimAngle: number | undefined;
     if (ax || ay) {
-      aimX = this.player.x + ax * 100;
-      aimY = this.player.y + ay * 100;
+      aimAngle = Math.atan2(ay, ax);
       fire = true;
     }
-    return { moveX: mx, moveY: my, aimX, aimY, fire, dash: Phaser.Input.Keyboard.JustDown(k.SPACE), sneak: k.SHIFT.isDown };
+    const firePressed = this.firePressed;
+    this.firePressed = false;
+    return { moveX: mx, moveY: my, aimX: world.x, aimY: world.y, aimAngle, fire, firePressed, dash: Phaser.Input.Keyboard.JustDown(k.SPACE), sneak: k.SHIFT.isDown };
   }
 
   private handleButtons(): void {
@@ -2070,48 +2119,74 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.lastFireAt = this.run.time;
     this.chargeAnnounced = false;
     const glow = freezes ? 0xbfeaff : crit ? 0xffd54a : charged ? 0xfff2a8 : (this.look.glow ?? w.color);
-    for (let i = 0; i < n; i++) {
-      const a = n > 1 ? angle - spread / 2 + (spread * i) / (n - 1) : angle;
-      this.playerShots.spawn({
-        x: p.x + Math.cos(a) * 18,
-        y: p.y + Math.sin(a) * 18 - 6,
-        angle: a,
-        speed: st.shotSpeed,
-        damage: st.damage * (crit ? SHOTS.critMult : 1) * (charged ? SHOTS.chargeMult : 1),
-        radius: st.shotSize * (charged ? SHOTS.chargeSize : 1) * (crit ? 1.25 : 1),
-        life: st.range / st.shotSpeed,
-        bounces: Math.round(st.bounces),
-        // Junk cycles through its pile in order, so the look never touches the gameplay RNG.
-        texture: freezes ? 'shot-ice' : looks[this.shotsFired++ % looks.length],
-        tint: freezes || thrown ? undefined : crit ? 0xffd54a : w.color,
-        glow,
-        spin: freezes ? 0 : w.spin,
-        source: 'shot',
-        pierce: Math.round(st.pierce) + (charged ? SHOTS.chargePierce : 0),
-        homing: st.homing,
-        split: Math.round(st.split),
-        blast: st.blast,
-        chain: Math.round(st.chain),
-        ricochet: Math.round(st.ricochet),
-        crit,
-        freezes,
-        charged,
-      });
+    const texture = freezes ? 'shot-ice' : looks[this.shotsFired++ % looks.length];
+
+    // Every shot starts at the muzzle, fanning out from there. The weapon is held at chest height,
+    // so a shot flies over its floor point (which is what hits walls and enemies). A wall between
+    // Morty and his muzzle stops it right there: it never comes out the other side.
+    const rig = p.rig();
+    const size = p.held.size;
+    const floor = { x: rig.muzzle.x, y: rig.muzzle.y + rig.lift };
+    const clear = clearMuzzle({ x: p.x, y: p.y }, floor, (x, y) => this.solidForShots(x, y));
+    const muzzle = { x: clear.at.x, y: clear.at.y - rig.lift };
+    if (clear.blocked) {
+      this.fx.burst('spark', muzzle.x, muzzle.y, 6);
+      this.fx.pop(muzzle.x, muzzle.y, 'fx-puff', 0xffffff, 0.3, 0.9, 120);
+      this.sfx('bounce');
+    } else {
+      for (let i = 0; i < n; i++) {
+        const a = n > 1 ? angle - spread / 2 + (spread * i) / (n - 1) : angle;
+        this.playerShots.spawn({
+          x: floor.x,
+          y: floor.y,
+          lift: rig.lift,
+          angle: a,
+          speed: st.shotSpeed,
+          damage: st.damage * (crit ? SHOTS.critMult : 1) * (charged ? SHOTS.chargeMult : 1),
+          radius: st.shotSize * (charged ? SHOTS.chargeSize : 1) * (crit ? 1.25 : 1),
+          life: st.range / st.shotSpeed,
+          bounces: Math.round(st.bounces),
+          // Junk cycles through its pile in order, so the look never touches the gameplay RNG.
+          texture,
+          tint: freezes || thrown ? undefined : crit ? 0xffd54a : w.color,
+          glow,
+          spin: freezes ? 0 : w.spin,
+          source: 'shot',
+          pierce: Math.round(st.pierce) + (charged ? SHOTS.chargePierce : 0),
+          homing: st.homing,
+          split: Math.round(st.split),
+          blast: st.blast,
+          chain: Math.round(st.chain),
+          ricochet: Math.round(st.ricochet),
+          crit,
+          freezes,
+          charged,
+        });
+      }
     }
     this.sfx(charged ? 'charge-shot' : (w.sfx ?? (w.damageMult > 1.2 ? 'shoot-heavy' : 'shoot')));
-    if (charged) {
-      this.fx.pop(p.x + Math.cos(angle) * 26, p.y + Math.sin(angle) * 26 - 6, 'fx-star', 0xfff2a8, 1, 3.2, 200, angle);
-      this.kickCamera(angle + Math.PI, 5);
-    } else if (thrown) {
-      // A throw: a little whoosh off his hand and a lighter kick than a gun.
-      this.fx.pop(p.x + Math.cos(angle) * 22, p.y + Math.sin(angle) * 22 - 6, 'fx-puff', 0xffffff, 0.3, 1, 130);
-      this.kickCamera(angle + Math.PI, 1.2);
+    const W = FEEL.weapon;
+    p.recoil(angle, W.bodyNudge);
+    if (thrown) {
+      // A throw: the arm swings through, with a whoosh off his hand and a lighter kick than a gun.
+      this.fx.pop(muzzle.x, muzzle.y, 'fx-puff', 0xffffff, 0.35, 1.1, 140);
+      this.fx.pop(rig.hand.x, rig.hand.y, 'fx-slash', 0xffffff, 0.45, 0.8, 120, angle + rig.side * 0.5);
+      this.kickCamera(angle + Math.PI, W.cameraKick * 0.5);
     } else {
-      this.fx.pop(p.x + Math.cos(angle) * 24, p.y + Math.sin(angle) * 24 - 6, 'fx-star', w.color, 0.5, 1.5, 90, angle);
-      this.kickCamera(angle + Math.PI, 2.2);
+      // The flash: the weapon's color with a white-hot core, sized by the weapon.
+      const k = Math.max(0.7, Math.min(1.8, size)) * (charged ? 1.5 : 1);
+      this.fx.pop(muzzle.x, muzzle.y, 'fx-muzzle', charged ? 0xfff2a8 : w.color, 0.8 * k, 1.35 * k, W.flashMs, angle);
+      this.fx.pop(muzzle.x, muzzle.y, 'fx-muzzle', 0xffffff, 0.55 * k, 0.9 * k, W.flashMs * 0.8, angle);
+      this.kickCamera(angle + Math.PI, W.cameraKick * k);
     }
-    runHook(this.sources(), 'onFire', this.ctx, { angle, x: p.x, y: p.y });
+    runHook(this.sources(), 'onFire', this.ctx, { angle, x: muzzle.x, y: muzzle.y + rig.lift });
     this.mechanics.forEach((m) => m.inst.onPlayerEvent?.({ type: 'fire', angle }));
+  }
+
+  /** What stops shots: walls and the void outside the room (low blocks don't). */
+  private solidForShots(x: number, y: number): boolean {
+    const t = this.roomView?.tileAt(x, y);
+    return t === 'wall' || t === 'void';
   }
 
   onDash(): void {
@@ -2239,6 +2314,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
         spin: SPIN[kind] ?? 0,
         tag: sourceName,
         applies: spec.applies,
+        lift: spec.lift,
       });
     }
   }
@@ -2760,7 +2836,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   }
 
   /** Slows the whole game to `factor` speed for `seconds` of real time. */
-  private slowMo(factor: number, seconds: number): void {
+  /** Slows the game down for a while (perfect dodges; the debug console, to watch a shot leave). */
+  slowMo(factor: number, seconds: number): void {
     this.timeFactor = factor;
     this.slowMoUntil = this.time.now + seconds * 1000;
     this.physics.world.timeScale = 1 / factor;
@@ -2781,9 +2858,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       playerId: () => this.run.act.playable,
       playerPos: () => ({ x: this.player.x, y: this.player.y }),
       movePlayer: (x, y) => this.player.setPosition(x, y),
-      facePlayer: (left) => {
-        this.player.aimAngle = left ? Math.PI : 0;
-      },
+      facePlayer: (left) => this.player.face(left),
       spriteKey: (who) => this.reg.characters.get(who)?.sprite?.key ?? null,
       say: (who, text, seconds) => this.say(who, text, seconds),
       setAnchor: (who, anchor, previous) => {

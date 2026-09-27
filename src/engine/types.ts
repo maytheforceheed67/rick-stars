@@ -47,7 +47,21 @@ export interface SpriteArt {
   key: string;
   width: number;
   height: number;
-  draw(g: Graphics, w: number, h: number): void;
+  /**
+   * Draws the sprite. With `poses`, it's also baked in every SpritePose (a walk cycle, and a
+   * free front arm for holding a weapon); without a pose it draws the plain standing frame.
+   */
+  draw(g: Graphics, w: number, h: number, pose?: SpritePose): void;
+  /** Bake walk-cycle and weapon-holding frames too (characters who walk around and fight). */
+  poses?: boolean;
+}
+
+/** One frame of a character in motion (SpriteArt.poses). */
+export interface SpritePose {
+  /** The walk cycle: -1 the left foot is up, 1 the right foot, 0 both down. */
+  stride: -1 | 0 | 1;
+  /** Leave out one arm (in the drawing's own left/right: -1 left, 1 right); a held weapon's arm replaces it. */
+  freeArm: -1 | 0 | 1;
 }
 
 /** Draws a 32x32 item/status icon (centered at 16,16). */
@@ -75,6 +89,11 @@ export interface CharacterDef extends ContentMeta {
   sprite?: SpriteArt;
   /** The same sprite with a different shirt color (cosmetic upgrades for playable characters). */
   recolor?(shirt: number, key: string): SpriteArt;
+  /**
+   * How a playable character holds a weapon: the shoulder, from the body's center (its feet-level
+   * middle), on the right side (mirrored for the left), and the colors of the arm that holds it.
+   */
+  holds?: { shoulder: { x: number; y: number }; sleeve: number; skin: number };
 }
 
 export interface CutscenePanel {
@@ -212,6 +231,17 @@ export interface WeaponSpec {
   bounces?: number;
   /** Sound each shot makes (default 'shoot', or 'shoot-heavy' for hard hitters). */
   sfx?: string;
+  /**
+   * The weapon Morty visibly holds: a sprite drawn pointing right, held at 6 px from its left
+   * edge, halfway up. Guns need one; thrown weapons hold the next thing they throw by default.
+   */
+  held?: string;
+  /** Where his hand is, from his shoulder, along the aim (x) and across it (y, + is down when aiming right). */
+  grip?: { x: number; y: number };
+  /** Where shots leave, from the hand, along the barrel (x) and across it (y). */
+  muzzle?: { x: number; y: number };
+  /** Muzzle flash size (1 = Rick's spare ray gun; his own gun gets a bigger one). */
+  flash?: number;
 }
 
 export interface ItemDef extends ContentMeta {
@@ -484,6 +514,8 @@ export interface EnemyShotSpec {
   life?: number;
   /** Status applied to the player on hit (e.g. 'stamped'). */
   applies?: ContentId;
+  /** Drawn this far above its floor point (a gun held at chest height; see EnemyDef.muzzle). */
+  lift?: number;
 }
 
 export type MeleeSpec =
@@ -592,6 +624,11 @@ export interface EnemyDef extends ContentMeta {
   contactDamage: number;
   art: SpriteArt;
   brain(api: EnemyApi): Brain;
+  /**
+   * Where this enemy's gun fires from, from its center, facing right (mirrored when it faces
+   * left). Its shots start there instead of at its middle, with a small muzzle flash.
+   */
+  muzzle?: { x: number; y: number };
   /** Chance to drop Scrap on death (elites always drop). */
   scrapChance?: number;
   flying?: boolean;

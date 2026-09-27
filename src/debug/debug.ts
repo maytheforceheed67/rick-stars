@@ -73,6 +73,7 @@ export function installDebug(scene: RunScene): void {
       s.debugSpawnShots(shots);
     },
     fps: () => current?.game.loop.actualFps ?? 0,
+    slowMo: (factor = 0.1, seconds = 3) => current?.slowMo(factor, seconds),
   });
   buildPanel();
   refreshSelects();

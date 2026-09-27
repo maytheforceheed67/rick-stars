@@ -1,25 +1,38 @@
 /**
  * The playable character: movement, dashing (with invulnerability), aiming, firing cadence,
  * knockback and falling. The run scene owns health and decides what firing actually does.
+ *
+ * Two objects make up the character. `sprite` is the physics body (invisible); `view` is what
+ * you see, drawn on top of it with its own bob, lean and nudges so the look never pushes the
+ * body around. Tweens on `sprite` (scale, angle, alpha) show on the view too.
  */
 import Phaser from 'phaser';
 import { PLAYER } from '../../content/balance';
-import { TEXTURE_PAD } from '../art/textures';
+import { poseKey, TEXTURE_PAD } from '../art/textures';
 import type { StatBlock } from '../effects/stats';
 import type { Rng } from '../rng';
 import type { Settings } from '../save/save';
-import type { PlayerRef, StatusFlags, TileKind } from '../types';
-
+import type { PlayerRef, StatusFlags, TileKind, Vec } from '../types';
+import { FireGate, type RigPose } from './aim';
+import { HeldWeapon } from './HeldWeapon';
 
 /** Top speed of a knockback, in pixels per second. */
 const MAX_KNOCK = 900;
+/** He keeps facing where he shot for this long after the last shot. */
+const FACE_AIM_AFTER_SHOT = 0.4;
+
 export interface PlayerInput {
   moveX: number;
   moveY: number;
   /** World point to aim at. */
   aimX: number;
   aimY: number;
+  /** Aiming with the arrow keys: an exact direction instead of a point. */
+  aimAngle?: number;
+  /** Fire is held down. */
   fire: boolean;
+  /** Fire went down since the last frame (a click is never lost, even a quick one). */
+  firePressed: boolean;
   /** Dash pressed this frame. */
   dash: boolean;
   sneak: boolean;
@@ -40,10 +53,17 @@ export interface PlayerHost {
   settings(): Settings;
   readonly rng: Rng;
   godMode(): boolean;
+  /** Game seconds this frame (slow motion included). */
+  frameDt(): number;
 }
 
 export class Player implements PlayerRef {
+  /** The physics body. Invisible: `view` is what you see. */
   readonly sprite: Phaser.Physics.Arcade.Sprite;
+  /** What you see of him. */
+  readonly view: Phaser.GameObjects.Image;
+  /** The weapon in his hand. */
+  readonly held: HeldWeapon;
   private readonly shadow: Phaser.GameObjects.Image;
   readonly radius = PLAYER.bodyRadius;
   aimAngle = 0;
@@ -56,7 +76,6 @@ export class Player implements PlayerRef {
   iframes = 0;
   knockVx = 0;
   knockVy = 0;
-  fireCooldown = 0;
   falling = 0;
   private fallDone: (() => void) | null = null;
   private locked = false;
@@ -70,6 +89,19 @@ export class Player implements PlayerRef {
   private scrambleMode = 0;
   private ghostTimer = 0;
   private t = 0;
+  private readonly gate = new FireGate();
+  /** The character's texture (poses are baked from it). */
+  private baseKey = '';
+  private posed = false;
+  /** Which way he faces (the view is flipped when true). */
+  faceLeft = false;
+  private sinceShot = Infinity;
+  /** What he's aiming at this frame: a world point, or a direction (arrow keys). */
+  private aim: Vec | number = 0;
+  /** Visual-only offsets: a nudge back when he fires. */
+  private nudgeX = 0;
+  private nudgeY = 0;
+  private vx = 0;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -79,8 +111,12 @@ export class Player implements PlayerRef {
     y: number,
   ) {
     this.shadow = scene.add.image(x, y, 'shadow').setDepth(-400).setScale(0.8);
-    this.sprite = scene.physics.add.sprite(x, y, texture);
+    this.sprite = scene.physics.add.sprite(x, y, texture).setVisible(false);
+    this.view = scene.add.image(x, y, texture);
+    this.held = new HeldWeapon(scene);
     this.applyTexture(texture);
+    // Drawn after physics has moved the body this frame, so the look never lags behind it.
+    scene.events.on(Phaser.Scenes.Events.POST_UPDATE, this.syncView, this);
   }
 
   private applyTexture(texture: string): void {
@@ -92,6 +128,9 @@ export class Player implements PlayerRef {
     const centerY = TEXTURE_PAD + artH - this.radius * 0.9;
     s.setOrigin(0.5, centerY / fh);
     (s.body as Phaser.Physics.Arcade.Body).setCircle(this.radius, fw / 2 - this.radius, centerY - this.radius);
+    this.baseKey = texture;
+    this.posed = this.scene.textures.exists(poseKey(texture, 1, 0));
+    this.view.setTexture(texture).setOrigin(0.5, centerY / fh);
   }
 
   setTexture(texture: string): void {
@@ -125,6 +164,10 @@ export class Player implements PlayerRef {
   get inPerfectWindow(): boolean {
     return !this.perfectUsed && this.dashAge <= PLAYER.perfectDodgeWindow;
   }
+  /** Seconds until the weapon can fire again. */
+  get fireCooldown(): number {
+    return this.gate.cooldown;
+  }
 
   heal(halves: number): void {
     this.host.healPlayer(halves);
@@ -151,10 +194,18 @@ export class Player implements PlayerRef {
     this.shadow.setPosition(x, y + 4);
     this.knockVx = 0;
     this.knockVy = 0;
+    this.syncView();
   }
 
   setControlLocked(locked: boolean): void {
     this.locked = locked;
+  }
+
+  /** Turns him to face left or right (a scene turning him toward someone). */
+  face(left: boolean): void {
+    this.faceLeft = left;
+    this.aimAngle = left ? Math.PI : 0;
+    this.aim = this.aimAngle;
   }
 
   /** Plays the fall animation, then calls onDone (the scene moves Morty back to safe ground). */
@@ -165,19 +216,34 @@ export class Player implements PlayerRef {
     (this.sprite.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
   }
 
+  /**
+   * Where his weapon is right now, aiming the way he's aiming: the arm, the hand and the muzzle
+   * shots leave from. Uses the body where physics has put it this frame.
+   */
+  rig(): RigPose {
+    const b = this.sprite.body as Phaser.Physics.Arcade.Body;
+    return this.held.poseAt({ x: b.center.x, y: b.center.y }, this.aim);
+  }
+
+  /** A shot just left: the weapon kicks, and his body gets a small nudge back. */
+  recoil(angle: number, px: number): void {
+    this.held.fire();
+    this.nudgeX = -Math.cos(angle) * px;
+    this.nudgeY = -Math.sin(angle) * px;
+  }
+
   // ---- per frame ----------------------------------------------------------------------------------
 
   update(dt: number, input: PlayerInput): void {
     this.t += dt;
+    this.sinceShot += dt;
     this.iframes = Math.max(0, this.iframes - dt);
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
-    this.fireCooldown = Math.max(0, this.fireCooldown - dt);
     this.dashAge += dt;
     const decay = Math.exp(-dt * 10);
     this.knockVx *= decay;
     this.knockVy *= decay;
     const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-    const reduced = this.host.settings().reducedFlash;
 
     if (this.falling > 0) {
       this.falling -= dt;
@@ -258,46 +324,89 @@ export class Player implements PlayerRef {
       vx = mx * speed;
       vy = my * speed;
     }
+    this.vx = vx;
     body.setVelocity(vx + this.knockVx, vy + this.knockVy);
 
     if (!this.locked) {
-      this.aimAngle = Math.atan2(input.aimY - this.sprite.y, input.aimX - this.sprite.x);
-      if (flags.wobblyAim) this.aimAngle += Math.sin(this.t * 4.3) * 0.35 + Math.sin(this.t * 9.7) * 0.12;
-      if (input.fire && this.fireCooldown <= 0 && this.host.armed()) {
-        this.fireCooldown = 1 / Math.max(0.1, stats.fireRate);
-        this.host.onFire(this.aimAngle);
+      this.aim = input.aimAngle ?? { x: input.aimX, y: input.aimY };
+      // Aim from the shoulder, so a gun's barrel points right at the cursor.
+      this.aimAngle = this.rig().angle;
+      if (flags.wobblyAim) {
+        this.aimAngle += Math.sin(this.t * 4.3) * 0.35 + Math.sin(this.t * 9.7) * 0.12;
+        this.aim = this.aimAngle;
       }
     }
-
-    // Visuals
-    const s = this.sprite;
-    s.setDepth(s.y);
-    s.setFlipX(Math.cos(this.aimAngle) < 0);
-    if (this.dashLeft > 0) s.setAngle(this.dashVx >= 0 ? 14 : -14);
-    else s.setAngle(this.moving ? Math.sin(this.t * (this.sneaking ? 9 : 18)) * 5 : 0);
-    if (this.iframes > 0 && this.dashLeft <= 0) {
-      s.setAlpha(reduced ? 0.55 + 0.25 * Math.sin(this.t * 10) : Math.sin(this.t * 45) > 0 ? 1 : 0.3);
-    } else {
-      s.setAlpha(this.sneaking ? 0.75 : 1);
+    const interval = 1 / Math.max(0.1, stats.fireRate);
+    const canFire = !this.locked && this.host.armed();
+    if (this.gate.step(dt, input.firePressed && !this.locked, input.fire && !this.locked, interval, canFire)) {
+      this.sinceShot = 0;
+      this.host.onFire(this.aimAngle);
     }
+
+    // Facing: toward the aim while shooting (and a moment after), otherwise where he's walking,
+    // holding it through straight up and down so he doesn't flicker.
+    const shooting = this.sinceShot < FACE_AIM_AFTER_SHOT;
+    const c = Math.cos(this.aimAngle);
+    if (shooting || !this.moving) {
+      if (c < -0.2) this.faceLeft = true;
+      else if (c > 0.2) this.faceLeft = false;
+    } else if (Math.abs(this.vx) > 0.35 * Math.hypot(vx, vy)) {
+      this.faceLeft = this.vx < 0;
+    }
+  }
+
+  /** Puts the view (and the weapon in his hand) where the body is, with the look's offsets. */
+  private syncView(): void {
+    const s = this.sprite;
+    const v = this.view;
+    if (!v.active) return;
+    const dt = this.host.frameDt();
+    const k = Math.exp(-dt * 30);
+    this.nudgeX *= k;
+    this.nudgeY *= k;
+    const armed = this.held.armed && this.falling <= 0;
+    // The weapon's arm replaces the body's own arm on that side (in the drawing's left/right).
+    const side = this.held.side;
+    const freeArm = armed ? ((this.faceLeft ? -side : side) as -1 | 1) : 0;
+    const key = this.posed ? poseKey(this.baseKey, 0, freeArm) : this.baseKey;
+    if (v.texture.key !== key && this.scene.textures.exists(key)) v.setTexture(key);
+    v.setPosition(s.x + this.nudgeX, s.y + this.nudgeY)
+      .setOrigin(s.originX, s.originY)
+      .setScale(s.scaleX, s.scaleY)
+      .setFlipX(this.faceLeft)
+      .setDepth(s.y);
+    const reduced = this.host.settings().reducedFlash;
+    let alpha = s.alpha;
+    let lean = 0;
+    if (this.dashLeft > 0) lean = this.dashVx >= 0 ? 14 : -14;
+    else if (this.moving && !this.locked) lean = Math.sin(this.t * (this.sneaking ? 9 : 18)) * 5;
+    if (this.iframes > 0 && this.dashLeft <= 0) alpha *= reduced ? 0.55 + 0.25 * Math.sin(this.t * 10) : Math.sin(this.t * 45) > 0 ? 1 : 0.3;
+    else if (this.sneaking) alpha *= 0.75;
+    v.setAngle(s.angle + lean).setAlpha(alpha);
+    s.setDepth(s.y);
     this.shadow.setPosition(s.x, s.y + 4);
+    const show = armed && s.scaleX > 0.9 && s.alpha > 0.6 && v.visible;
+    this.held.update(dt, { x: v.x, y: v.y }, this.aim, show, alpha, v.depth);
   }
 
   private ghost(): void {
-    const s = this.sprite;
+    const v = this.view;
     const g = this.scene.add
-      .image(s.x, s.y, s.texture.key)
-      .setOrigin(s.originX, s.originY)
-      .setFlipX(s.flipX)
-      .setAngle(s.angle)
-      .setDepth(s.depth - 1)
+      .image(v.x, v.y, v.texture.key)
+      .setOrigin(v.originX, v.originY)
+      .setFlipX(v.flipX)
+      .setAngle(v.angle)
+      .setDepth(v.depth - 1)
       .setAlpha(0.45)
       .setTint(0x9fdcff);
     this.scene.tweens.add({ targets: g, alpha: 0, duration: 220, onComplete: () => g.destroy() });
   }
 
   destroy(): void {
+    this.scene.events.off(Phaser.Scenes.Events.POST_UPDATE, this.syncView, this);
+    this.held.destroy();
     this.shadow.destroy();
+    this.view.destroy();
     this.sprite.destroy();
   }
 }

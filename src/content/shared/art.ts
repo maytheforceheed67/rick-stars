@@ -3,7 +3,7 @@
  * drawn in code with the engine's wobbly-outline helpers.
  */
 import { blob, dot, eye, INK, jitter, mouth, shade, stroke, wonkyPoly, wonkyRect, type EyeMood } from '../../engine/art/draw';
-import type { Graphics } from '../../engine/types';
+import type { Graphics, SpritePose } from '../../engine/types';
 
 export const SKIN = 0xf3cfa8;
 export const SKIN_PALE = 0xefd9c4;
@@ -276,8 +276,14 @@ function drawOutfit(g: Graphics, o: OutfitStyle, shirt: number, skin: number, cx
 }
 
 /** Full-body chibi sprite, feet at the bottom of the w x h box. */
-export function drawPerson(g: Graphics, w: number, h: number, s: PersonStyle): void {
+/**
+ * Draws a person standing, or with a `pose`: one foot up mid-stride (the arms swinging against
+ * the legs), and/or one arm left out because a held weapon's arm is drawn in its place.
+ */
+export function drawPerson(g: Graphics, w: number, h: number, s: PersonStyle, pose?: SpritePose): void {
   const cx = w / 2;
+  const stride = pose?.stride ?? 0;
+  const freeArm = pose?.freeArm ?? 0;
   const build = s.build ?? 'kid';
   const bodyW = w * (build === 'big' ? 0.78 : build === 'adult' ? 0.6 : 0.56);
   const headR = w * (build === 'kid' ? 0.3 : build === 'big' ? 0.27 : 0.26);
@@ -288,21 +294,32 @@ export function drawPerson(g: Graphics, w: number, h: number, s: PersonStyle): v
 
   if (hasBackHair(s.hairStyle)) drawHairBack(g, s.hairStyle, s.hair, cx, headY, headR, s.seed);
 
-  blob(g, cx - bodyW * 0.22, h - 5, bodyW * 0.2, 4.5, { fill: shoe, seed: s.seed + 1, lineWidth: 2 });
-  blob(g, cx + bodyW * 0.22, h - 5, bodyW * 0.2, 4.5, { fill: shoe, seed: s.seed + 2, lineWidth: 2 });
-  wonkyRect(g, cx - bodyW * 0.38, torsoBot - 4, bodyW * 0.76, h - torsoBot - 3, { fill: s.pants, seed: s.seed + 3, radius: 3, lineWidth: 2.5 });
-  stroke(g, [[cx, torsoBot], [cx, h - 8]], shade(s.pants, -0.35), 2);
+  // Mid-stride, one foot is up off the floor and its leg is shorter.
+  const lift = (side: number) => (stride === side ? 3.5 : 0);
+  blob(g, cx - bodyW * 0.22, h - 5 - lift(-1), bodyW * (stride === -1 ? 0.18 : 0.2), 4.5, { fill: shoe, seed: s.seed + 1, lineWidth: 2 });
+  blob(g, cx + bodyW * 0.22, h - 5 - lift(1), bodyW * (stride === 1 ? 0.18 : 0.2), 4.5, { fill: shoe, seed: s.seed + 2, lineWidth: 2 });
+  if (stride === 0) {
+    wonkyRect(g, cx - bodyW * 0.38, torsoBot - 4, bodyW * 0.76, h - torsoBot - 3, { fill: s.pants, seed: s.seed + 3, radius: 3, lineWidth: 2.5 });
+    stroke(g, [[cx, torsoBot], [cx, h - 8]], shade(s.pants, -0.35), 2);
+  } else {
+    for (const side of [-1, 1]) {
+      const x = side < 0 ? cx - bodyW * 0.38 : cx;
+      wonkyRect(g, x, torsoBot - 4, bodyW * 0.38, h - torsoBot - 3 - lift(side), { fill: s.pants, seed: s.seed + 3 + side, radius: 3, lineWidth: 2.5 });
+    }
+  }
 
   const bare = s.coat === undefined && (s.sleeves === 'none' || s.sleeves === 'short');
   const armColor = s.coat ?? (bare ? s.skin : s.shirt);
   const armY = torsoTop + (torsoBot - torsoTop) * 0.45;
   const armH = (torsoBot - torsoTop) * 0.42;
   for (const side of [-1, 1]) {
-    blob(g, cx + side * bodyW * 0.55, armY, bodyW * 0.14, armH, { fill: armColor, seed: s.seed + (side < 0 ? 4 : 5), lineWidth: 2.5 });
-    if (bare && s.sleeves === 'short') blob(g, cx + side * bodyW * 0.53, armY - armH * 0.55, bodyW * 0.15, armH * 0.42, { fill: s.shirt, seed: s.seed + (side < 0 ? 12 : 13), lineWidth: 2 });
+    if (side === freeArm) continue;
+    // Arms swing against the legs: the one opposite the lifted foot comes forward (a little lower).
+    const swing = stride === 0 ? 0 : stride === side ? -1 : 1.5;
+    blob(g, cx + side * bodyW * 0.55, armY + swing, bodyW * 0.14, armH, { fill: armColor, seed: s.seed + (side < 0 ? 4 : 5), lineWidth: 2.5 });
+    if (bare && s.sleeves === 'short') blob(g, cx + side * bodyW * 0.53, armY + swing - armH * 0.55, bodyW * 0.15, armH * 0.42, { fill: s.shirt, seed: s.seed + (side < 0 ? 12 : 13), lineWidth: 2 });
+    dot(g, cx + side * bodyW * 0.56, torsoBot - 2 + swing, bodyW * 0.1, s.skin);
   }
-  dot(g, cx - bodyW * 0.56, torsoBot - 2, bodyW * 0.1, s.skin);
-  dot(g, cx + bodyW * 0.56, torsoBot - 2, bodyW * 0.1, s.skin);
   wonkyRect(g, cx - bodyW / 2, torsoTop, bodyW, torsoBot - torsoTop, { fill: s.shirt, seed: s.seed + 6, radius: 7, lineWidth: 2.5 });
   // The head covers the top of the torso, so necklines start at its chin.
   const neck = headY + headR * 0.98;

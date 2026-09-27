@@ -21,7 +21,8 @@ export function mortySprite(shirt = MORTY_SHIRT, key = 'morty'): SpriteArt {
     key,
     width: 42,
     height: 56,
-    draw: (g, w, h) =>
+    poses: true,
+    draw: (g, w, h, pose) =>
       drawPerson(g, w, h, {
         seed: 101,
         skin: SKIN,
@@ -33,7 +34,7 @@ export function mortySprite(shirt = MORTY_SHIRT, key = 'morty'): SpriteArt {
         eyes: 'normal',
         mouth: 'wavy',
         brow: 0x4a2a12,
-      }),
+      }, pose),
   };
 }
 
@@ -41,7 +42,8 @@ export const rickSprite: SpriteArt = {
   key: 'rick',
   width: 46,
   height: 64,
-  draw: (g, w, h) =>
+  poses: true,
+  draw: (g, w, h, pose) =>
     drawPerson(g, w, h, {
       seed: 202,
       skin: SKIN_PALE,
@@ -56,7 +58,7 @@ export const rickSprite: SpriteArt = {
       mouth: 'wavy',
       unibrow: true,
       brow: 0x7fa8b8,
-    }),
+    }, pose),
 };
 
 export const morty: CharacterDef = {
@@ -67,6 +69,8 @@ export const morty: CharacterDef = {
   color: MORTY_SHIRT,
   sprite: mortySprite(),
   recolor: (shirt, key) => mortySprite(shirt, key),
+  // Measured off drawPerson's kid build: the shoulder, and the shirt's sleeve.
+  holds: { shoulder: { x: 10, y: -14 }, sleeve: MORTY_SHIRT, skin: SKIN },
   portrait: (g, S, expr) =>
     drawPortrait(g, S, expr, {
       seed: 11,
@@ -95,6 +99,7 @@ export const rick: CharacterDef = {
   canon: true,
   color: RICK_HAIR,
   sprite: rickSprite,
+  holds: { shoulder: { x: 12, y: -20 }, sleeve: RICK_COAT, skin: SKIN_PALE },
   portrait: (g, S, expr) =>
     drawPortrait(g, S, expr === 'normal' ? 'drunk' : expr, {
       seed: 22,
@@ -131,8 +136,10 @@ export const jerry: CharacterDef = {
     key: 'jerry',
     width: 44,
     height: 62,
-    draw: (g, w, h) => drawPerson(g, w, h, { seed: 303, ...JERRY, pants: 0x9dbde6, shoes: 0x222222, build: 'adult', mouth: 'frown' }),
+    poses: true,
+    draw: (g, w, h, pose) => drawPerson(g, w, h, { seed: 303, ...JERRY, pants: 0x9dbde6, shoes: 0x222222, build: 'adult', mouth: 'frown' }, pose),
   },
+  holds: { shoulder: { x: 12, y: -19 }, sleeve: JERRY.shirt, skin: SKIN },
   portrait: (g, S, expr) => drawPortrait(g, S, expr, { seed: 33, ...JERRY, headR: 0.22, headStretch: 1.1 }),
 };
 
@@ -146,8 +153,10 @@ export const beth: CharacterDef = {
     key: 'beth',
     width: 44,
     height: 60,
-    draw: (g, w, h) => drawPerson(g, w, h, { seed: 404, ...BETH, pants: 0x3f63b0, shoes: 0xf4f4f4, build: 'adult', mouth: 'flat' }),
+    poses: true,
+    draw: (g, w, h, pose) => drawPerson(g, w, h, { seed: 404, ...BETH, pants: 0x3f63b0, shoes: 0xf4f4f4, build: 'adult', mouth: 'flat' }, pose),
   },
+  holds: { shoulder: { x: 12, y: -18 }, sleeve: SKIN, skin: SKIN },
   portrait: (g, S, expr) => drawPortrait(g, S, expr, { seed: 44, ...BETH, headR: 0.22 }),
 };
 
@@ -161,8 +170,10 @@ export const summer: CharacterDef = {
     key: 'summer',
     width: 42,
     height: 58,
-    draw: (g, w, h) => drawPerson(g, w, h, { seed: 505, ...SUMMER, pants: 0xf2f0ea, shoes: 0x262626, mouth: 'flat' }),
+    poses: true,
+    draw: (g, w, h, pose) => drawPerson(g, w, h, { seed: 505, ...SUMMER, pants: 0xf2f0ea, shoes: 0x262626, mouth: 'flat' }, pose),
   },
+  holds: { shoulder: { x: 10, y: -15 }, sleeve: SKIN, skin: SKIN },
   portrait: (g, S, expr) => drawPortrait(g, S, expr, { seed: 55, ...SUMMER, headR: 0.23 }),
 };
 

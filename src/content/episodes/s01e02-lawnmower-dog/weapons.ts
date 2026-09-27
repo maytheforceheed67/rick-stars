@@ -40,6 +40,38 @@ function tennisBall(g: Graphics, cx: number, cy: number, r: number, seed: number
 export const DOG_WEAPON_ART: SpriteArt[] = [
   { key: 'shot-rubber-duck', width: 28, height: 22, draw: (g) => duck(g, 11, 12, 8, 3101) },
   { key: 'shot-tennis-ball', width: 20, height: 20, draw: (g) => tennisBall(g, 10, 10, 8, 3111) },
+  // What Morty holds, pointing right and gripped at (6, halfway up).
+  {
+    // Rick's ray gun as Morty pictured it: pink, rounder, with a little "pew" sparkle.
+    key: 'held-imagined-ray-gun',
+    width: 30,
+    height: 16,
+    draw: (g) => {
+      wonkyRect(g, 3, 9, 6, 7, { fill: shade(0xf2b0cf, -0.3), seed: 3121, radius: 3 });
+      wonkyRect(g, 1, 3, 21, 10, { fill: 0xf2b0cf, seed: 3122, radius: 5 });
+      wonkyPoly(g, [[21, 4], [29, 2], [29, 14], [21, 12]], { fill: 0xc58bff, seed: 3123 });
+      dot(g, 8, 7, 1.8, 0xffffff, 0.8);
+      stroke(g, [[13, 6], [16, 9]], 0xc58bff, 1.8);
+      stroke(g, [[16, 6], [13, 9]], 0xc58bff, 1.8);
+    },
+  },
+  {
+    // A cat held like a gun: Morty's hand on its middle, the lasers come out of its eyes.
+    key: 'held-laser-cat',
+    width: 34,
+    height: 20,
+    draw: (g) => {
+      stroke(g, [[3, 9], [0, 4], [2, 1]], 0xf2a541, 3);
+      blob(g, 12, 11, 11, 6.5, { fill: 0xf2a541, seed: 3131, lineWidth: 2 });
+      for (const x of [16, 20]) stroke(g, [[x, 7], [x + 1, 14]], shade(0xf2a541, -0.35), 1.6);
+      blob(g, 26, 9, 7, 6.5, { fill: 0xf2a541, seed: 3132, lineWidth: 2 });
+      wonkyPoly(g, [[21, 5], [22, 0], [25, 4]], { fill: 0xf2a541, seed: 3133, lineWidth: 1.5 });
+      wonkyPoly(g, [[27, 4], [30, 0], [31, 5]], { fill: 0xf2a541, seed: 3134, lineWidth: 1.5 });
+      dot(g, 29.5, 8, 2, 0xff4a3d);
+      dot(g, 25.5, 8, 1.6, 0xff4a3d);
+      dot(g, 29.5, 8, 0.8, 0xffffff);
+    },
+  },
 ];
 
 export const imaginedRayGun: ItemDef = {
@@ -54,7 +86,7 @@ export const imaginedRayGun: ItemDef = {
   rarity: 'story',
   price: 0,
   noPool: true,
-  weapon: { damageMult: 1.15, fireRateMult: 1.05, extraProjectiles: 0, spread: 0, color: 0xc58bff },
+  weapon: { damageMult: 1.15, fireRateMult: 1.05, extraProjectiles: 0, spread: 0, color: 0xc58bff, held: 'held-imagined-ray-gun', muzzle: { x: 23, y: 0 }, flash: 1.1 },
   icon: (g) => {
     wonkyRect(g, 4, 12, 20, 9, { fill: 0xf2b0cf, seed: 1, radius: 3 });
     wonkyRect(g, 7, 19, 6, 9, { fill: shade(0xf2b0cf, -0.3), seed: 2, radius: 2 });
@@ -108,7 +140,20 @@ export const laserCat: ItemDef = {
   rarity: 'story',
   price: 0,
   noPool: true,
-  weapon: { damageMult: 1.1, fireRateMult: 1.1, extraProjectiles: 0, spread: 0.04, color: 0xff4a3d, speedMult: 1.25, sizeMult: 0.9, sfx: 'laser' },
+  weapon: {
+    damageMult: 1.1,
+    fireRateMult: 1.1,
+    extraProjectiles: 0,
+    spread: 0.04,
+    color: 0xff4a3d,
+    speedMult: 1.25,
+    sizeMult: 0.9,
+    sfx: 'laser',
+    held: 'held-laser-cat',
+    // Out of its eyes.
+    muzzle: { x: 24, y: -2 },
+    flash: 0.8,
+  },
   icon: (g) => {
     blob(g, 14, 18, 10, 8, { fill: 0xf2a541, seed: 21, lineWidth: 2 });
     wonkyPoly(g, [[6, 12], [8, 4], [12, 10]], { fill: 0xf2a541, seed: 22, lineWidth: 2 });

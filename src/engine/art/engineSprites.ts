@@ -121,6 +121,32 @@ export const ENGINE_SPRITES: SpriteArt[] = [
     },
   },
   { key: 'fx-dot', width: 8, height: 8, draw: (g) => dot(g, 4, 4, 4, 0xffffff) },
+  // A hand holding a weapon (tinted with the character's skin; the outline stays dark).
+  { key: 'held-hand', width: 8, height: 8, draw: (g) => dot(g, 4, 4, 3.4, 0xffffff) },
+  {
+    // A generic ray gun, for a gun that doesn't bring its own held sprite. Held at (6, 7).
+    key: 'held-gun',
+    width: 26,
+    height: 14,
+    draw: (g) => {
+      wonkyRect(g, 3, 8, 6, 6, { fill: 0x6d6a7c, seed: 91, radius: 2 });
+      wonkyRect(g, 1, 3, 19, 8, { fill: 0xb8bdd4, seed: 92, radius: 3 });
+      wonkyPoly(g, [[19, 4], [25, 2], [25, 12], [19, 10]], { fill: 0x97ce4c, seed: 93 });
+    },
+  },
+  {
+    // A muzzle flash: a hot core with spikes along the barrel (pointing right; added on top).
+    key: 'fx-muzzle',
+    width: 30,
+    height: 20,
+    draw: (g) => {
+      g.fillStyle(0xffffff, 0.45);
+      g.fillPoints([{ x: 0, y: 10 }, { x: 8, y: 1 }, { x: 30, y: 10 }, { x: 8, y: 19 }], true);
+      g.fillStyle(0xffffff, 1);
+      g.fillPoints([{ x: 2, y: 10 }, { x: 9, y: 5 }, { x: 22, y: 10 }, { x: 9, y: 15 }], true);
+      g.fillCircle(8, 10, 5);
+    },
+  },
   // A piece of junk circling Morty (the orbit stat).
   { key: 'orbit-junk', width: 22, height: 22, draw: (g) => gear(g, 11, 11, 10, 0xc9ced9) },
   {

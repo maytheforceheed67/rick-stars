@@ -613,6 +613,16 @@ function makeApi(e: Enemy, host: EnemyHost): EnemyApi {
       }
     },
     shoot(spec: EnemyShotSpec) {
+      const m = e.def.muzzle;
+      if (m && spec.x === undefined && spec.y === undefined) {
+        // Out of its gun: the tip of the barrel as drawn, over the floor point beside it.
+        const k = e.sizeScale;
+        const x = e.x + (e.flipX ? -m.x : m.x) * k;
+        const lift = Math.max(0, -m.y * k);
+        host.fx.pop(x, e.y - lift, 'fx-muzzle', 0xff8a3d, 0.4, 0.75, 70, spec.angle);
+        host.enemyShot({ ...spec, x, y: e.y, lift }, e.def.name);
+        return;
+      }
       host.enemyShot({ ...spec, x: spec.x ?? e.x, y: spec.y ?? e.y }, e.def.name);
     },
     melee(spec: MeleeSpec) {

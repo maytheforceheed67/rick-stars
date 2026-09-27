@@ -55,6 +55,21 @@ export const PILOT_WEAPON_ART: SpriteArt[] = [
       for (let x = 11; x < 20; x += 3) stroke(g, [[x, 3.5], [x + 1.5, 8.5]], shade(0xb8bdd4, -0.4), 1.2);
     },
   },
+  // What Morty holds: a dodgeball (without the streak), and Rick's own gun, bigger than the spare.
+  { key: 'held-dodgeball', width: 20, height: 20, draw: (g) => dodgeball(g, 10, 10, 8.5, 306) },
+  {
+    key: 'held-ricks-ray-gun',
+    width: 34,
+    height: 16,
+    draw: (g) => {
+      wonkyRect(g, 3, 9, 7, 7, { fill: shade(0xdfe6ee, -0.35), seed: 331, radius: 2 });
+      wonkyRect(g, 1, 3, 24, 10, { fill: 0xdfe6ee, seed: 332, radius: 4 });
+      wonkyRect(g, 8, 1, 9, 4, { fill: shade(0xdfe6ee, -0.2), seed: 333, radius: 2, lineWidth: 2 });
+      wonkyPoly(g, [[24, 3.5], [33, 1], [33, 15], [24, 12.5]], { fill: 0xff7ae3, seed: 334 });
+      dot(g, 13, 8, 2, 0xff7ae3);
+      dot(g, 18, 8, 1.5, INK);
+    },
+  },
   {
     // A dodgeball with a speed streak behind it. The ball sits in the middle of the texture, so
     // it's where the shot really is; the streak trails off to the left.
@@ -129,6 +144,7 @@ export const gymBagDodgeballs: ItemDef = {
     bounces: 1,
     knockbackMult: 2.2,
     sfx: 'throw-light',
+    held: 'held-dodgeball',
   },
   icon: (g) => {
     wonkyRect(g, 3, 14, 26, 14, { fill: 0x3a3150, seed: 321, radius: 5, lineWidth: 2 });
@@ -156,7 +172,17 @@ export const ricksRayGun: ItemDef = {
   rarity: 'story',
   price: 0,
   noPool: true,
-  weapon: { damageMult: 1.5, fireRateMult: 1.1, extraProjectiles: 0, spread: 0.06, color: 0xff7ae3, sfx: 'shoot-heavy' },
+  weapon: {
+    damageMult: 1.5,
+    fireRateMult: 1.1,
+    extraProjectiles: 0,
+    spread: 0.06,
+    color: 0xff7ae3,
+    sfx: 'shoot-heavy',
+    held: 'held-ricks-ray-gun',
+    muzzle: { x: 27, y: 0 },
+    flash: 1.5,
+  },
   icon: (g) => gunIcon(g, 0xdfe6ee, 0xff7ae3),
 };
 

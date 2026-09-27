@@ -86,6 +86,8 @@ export const dreamSoldier: EnemyDef = {
   radius: 14,
   contactDamage: 1,
   art: ART.soldier,
+  // The tip of its gun, as drawn.
+  muzzle: { x: 22, y: -9 },
   elite: { hpMult: 1.9, scale: 1.2, params: { burst: 6 }, mods: ['shielded'] },
   brain: function* (api: EnemyApi): Brain {
     let cooldown = api.rng.float(1, 2.2);
@@ -658,6 +660,8 @@ export const dogTrooper: EnemyDef = {
   radius: 14,
   contactDamage: 1,
   art: ART.trooper,
+  // The tip of its gun, as drawn.
+  muzzle: { x: 21, y: -4 },
   deathFx: 'spark',
   elite: { hpMult: 2, scale: 1.2, params: { burst: 3 }, mods: ['shielded'] },
   brain: function* (api: EnemyApi): Brain {

@@ -172,6 +172,38 @@ export const PLAYER = {
   perfectDodgeSlowMo: { factor: 0.3, seconds: 0.4 },
 };
 
+/**
+ * Game feel: how shots leave the weapon, how hits read, how Morty moves and what getting hurt
+ * looks like. The tests hold the movement and flash numbers to these.
+ */
+export const FEEL = {
+  weapon: {
+    /** A press while the weapon is cooling down still fires the moment it's ready, if it's this recent (s). */
+    fireBuffer: 0.15,
+    /** Default hand position, from the shoulder along the aim (x) and across it (y). */
+    grip: { x: 12, y: 0 },
+    /** Default muzzle, from the hand along the barrel (x) and across it (y). */
+    muzzle: { x: 16, y: 0 },
+    /** Where a thrown thing leaves his hand, from the hand. */
+    throwRelease: { x: 8, y: 0 },
+    /** The weapon switches hands only once the aim is this far past straight up or down (cos of the angle). */
+    sideDeadZone: 0.2,
+    /** Muzzle flash: this long (ms, 50-80), scaled by the weapon's `flash`. */
+    flashMs: 65,
+    /** On each shot the weapon kicks back along the barrel (px, 3-6 with the flash size) and tips up (degrees), settling in `recoilSeconds`. */
+    recoilPx: 4,
+    recoilTipDeg: 8,
+    recoilSeconds: 0.1,
+    /** Morty's body is nudged back this far (px) for a moment. */
+    bodyNudge: 1.5,
+    /** The camera kicks this far (px) per shot, half that for a throw (off with Screen shake off). */
+    cameraKick: 1.6,
+    /** A throw follows through this far past the aim (degrees) and the next thing is back in hand after `swingSeconds`. */
+    swingDeg: 70,
+    swingSeconds: 0.16,
+  },
+};
+
 export const ENEMIES = {
   /** Seconds before a spawned enemy starts acting. */
   spawnDelay: 0.6,
