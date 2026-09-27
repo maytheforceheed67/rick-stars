@@ -2,12 +2,12 @@
  * Sprites for the Pilot: enemies, bosses and props. All original art drawn in code.
  */
 import { blob, dot, eye, INK, jitter, mouth, PORTAL_GREEN, portalSwirl, shade, stroke, wonkyPoly, wonkyRect } from '../../../engine/art/draw';
-import type { Graphics, SpriteArt } from '../../../engine/types';
-import { drawPerson } from '../../shared/art';
+import type { Graphics, SpriteArt, SpritePose } from '../../../engine/types';
+import { armSwing, drawPerson } from '../../shared/art';
 
 // ---- people -------------------------------------------------------------------------------------
 
-export function drawFrank(g: Graphics, w: number, h: number, frozen = false): void {
+export function drawFrank(g: Graphics, w: number, h: number, frozen = false, pose?: SpritePose): void {
   drawPerson(g, w, h, {
     seed: 606,
     skin: frozen ? 0xcfeeff : 0xe8b98e,
@@ -20,10 +20,10 @@ export function drawFrank(g: Graphics, w: number, h: number, frozen = false): vo
     eyes: 'angry',
     mouth: 'grit',
     brow: frozen ? 0x7fb6d6 : 0x1a1410,
-  });
-  // Switchblade in his right hand.
+  }, pose);
+  // Switchblade in his right hand, swinging with it.
   const hx = w * 0.84;
-  const hy = h * 0.72;
+  const hy = h * 0.72 + armSwing(pose, 1);
   wonkyRect(g, hx - 3, hy - 4, 7, 12, { fill: frozen ? 0xa8d6ef : 0x5a3a22, seed: 61, radius: 2, lineWidth: 2 });
   wonkyPoly(g, [[hx - 2, hy - 4], [hx + 3, hy - 4], [hx + 1, hy - 20]], { fill: frozen ? 0xe8f7ff : 0xdfe6ee, seed: 62, lineWidth: 2 });
   if (frozen) {
@@ -63,12 +63,12 @@ export const PRINCIPAL = {
   brow: 0x5a5a5a,
 } as const;
 
-export function drawGoldenfold(g: Graphics, w: number, h: number): void {
-  drawPerson(g, w, h, { seed: 707, ...GOLDENFOLD, pants: 0x6a5646, build: 'adult', eyes: 'normal', mouth: 'flat' });
+export function drawGoldenfold(g: Graphics, w: number, h: number, pose?: SpritePose): void {
+  drawPerson(g, w, h, { seed: 707, ...GOLDENFOLD, pants: 0x6a5646, build: 'adult', eyes: 'normal', mouth: 'flat' }, pose);
 }
 
 /** Used by his character entry and as a room prop. */
-export const GOLDENFOLD_SPRITE: SpriteArt = { key: 'goldenfold', width: 44, height: 62, draw: (g, w, h) => drawGoldenfold(g, w, h) };
+export const GOLDENFOLD_SPRITE: SpriteArt = { key: 'goldenfold', width: 44, height: 62, poses: 'walk', draw: (g, w, h, pose) => drawGoldenfold(g, w, h, pose) };
 
 /** Gromflomite head: big glossy eyes, antennae, mandibles. */
 export function drawBugHead(g: Graphics, cx: number, cy: number, r: number, seed: number, skin = 0x8fb573, cap?: number): void {
@@ -94,13 +94,15 @@ export function drawBugHead(g: Graphics, cx: number, cy: number, r: number, seed
 }
 
 /** A Gromflomite customs agent body; `extra` draws the role's gear. */
-function drawAgent(g: Graphics, w: number, h: number, seed: number, uniform: number, extra?: (g: Graphics) => void, cap?: number): void {
+function drawAgent(g: Graphics, w: number, h: number, seed: number, uniform: number, extra?: (g: Graphics) => void, cap?: number, pose?: SpritePose): void {
   const cx = w / 2;
-  blob(g, cx - w * 0.14, h - 5, w * 0.13, 4.5, { fill: 0x1c1a26, seed: seed + 1, lineWidth: 2 });
-  blob(g, cx + w * 0.14, h - 5, w * 0.13, 4.5, { fill: 0x1c1a26, seed: seed + 2, lineWidth: 2 });
+  // Mid-stride, one shoe is up off the floor.
+  const lift = (side: number) => (pose?.stride === side ? 3.5 : 0);
+  blob(g, cx - w * 0.14, h - 5 - lift(-1), w * 0.13, 4.5, { fill: 0x1c1a26, seed: seed + 1, lineWidth: 2 });
+  blob(g, cx + w * 0.14, h - 5 - lift(1), w * 0.13, 4.5, { fill: 0x1c1a26, seed: seed + 2, lineWidth: 2 });
   wonkyRect(g, cx - w * 0.2, h * 0.7, w * 0.4, h * 0.26, { fill: shade(uniform, -0.2), seed: seed + 3, radius: 3, lineWidth: 2.5 });
-  blob(g, cx - w * 0.34, h * 0.56, w * 0.09, h * 0.14, { fill: uniform, seed: seed + 4, lineWidth: 2.5 });
-  blob(g, cx + w * 0.34, h * 0.56, w * 0.09, h * 0.14, { fill: uniform, seed: seed + 5, lineWidth: 2.5 });
+  blob(g, cx - w * 0.34, h * 0.56 + armSwing(pose, -1), w * 0.09, h * 0.14, { fill: uniform, seed: seed + 4, lineWidth: 2.5 });
+  blob(g, cx + w * 0.34, h * 0.56 + armSwing(pose, 1), w * 0.09, h * 0.14, { fill: uniform, seed: seed + 5, lineWidth: 2.5 });
   wonkyRect(g, cx - w * 0.28, h * 0.42, w * 0.56, h * 0.34, { fill: uniform, seed: seed + 6, radius: 6, lineWidth: 2.5 });
   dot(g, cx - w * 0.12, h * 0.5, 2.5, 0xffd54a);
   drawBugHead(g, cx, h * 0.26, w * 0.26, seed + 7, 0x8fb573, cap);
@@ -247,11 +249,13 @@ export const PILOT_ENEMY_ART: Record<string, SpriteArt> = {
     key: 'enemy-gromflomite-clerk',
     width: 42,
     height: 56,
-    draw: (g, w, h) =>
+    // He also walks in scenes, as the Gromflomite character.
+    poses: 'walk',
+    draw: (g, w, h, pose) =>
       drawAgent(g, w, h, 901, 0x3d4f7a, (gg) => {
         wonkyPoly(gg, [[w / 2 - 3, h * 0.43], [w / 2 + 3, h * 0.43], [w / 2 + 4, h * 0.62], [w / 2, h * 0.66], [w / 2 - 4, h * 0.62]], { fill: 0xd92f3a, seed: 905, lineWidth: 2 });
-        wonkyRect(gg, w * 0.74, h * 0.5, 12, 15, { fill: 0xf4efe6, seed: 906, radius: 1, lineWidth: 2 });
-      }),
+        wonkyRect(gg, w * 0.74, h * 0.5 + armSwing(pose, 1), 12, 15, { fill: 0xf4efe6, seed: 906, radius: 1, lineWidth: 2 });
+      }, undefined, pose),
   },
   guard: {
     key: 'enemy-gromflomite-guard',
@@ -394,7 +398,7 @@ export const PILOT_ENEMY_ART: Record<string, SpriteArt> = {
         wonkyRect(gg, w * 0.68, h * 0.5, 12, 16, { fill: 0x3a3a48, seed: 965, radius: 2, lineWidth: 2 });
       }, 0x9a4a1a),
   },
-  frank: { key: 'boss-frank', width: 66, height: 84, draw: (g, w, h) => drawFrank(g, w, h) },
+  frank: { key: 'boss-frank', width: 66, height: 84, poses: 'walk', draw: (g, w, h, pose) => drawFrank(g, w, h, false, pose) },
   supervisor: {
     key: 'boss-customs-supervisor',
     width: 74,

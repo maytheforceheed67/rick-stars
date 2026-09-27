@@ -61,6 +61,7 @@ export class StatusManager {
       out.wobblyMove ||= !!f.wobblyMove;
       out.wobblyAim ||= !!f.wobblyAim;
       out.scrambled ||= !!f.scrambled;
+      out.limp ||= !!f.limp;
     }
     return out;
   }

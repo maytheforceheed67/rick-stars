@@ -6,6 +6,8 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../engine/constants';
 import { INK } from '../engine/art/draw';
+import { inputDirection, stepWalk } from '../engine/runtime/motion';
+import { Walker } from '../engine/runtime/Walker';
 import { persist, svc } from '../engine/services';
 import type { UpgradeDef } from '../engine/types';
 import { CONTROLS_TEXT, Menu, settingsItems, type MenuItem } from '../engine/ui/Menu';
@@ -46,6 +48,9 @@ export class GarageScene extends Phaser.Scene {
   private panel: Phaser.GameObjects.GameObject[] = [];
   private scrapText!: Phaser.GameObjects.Text;
   private morty!: Phaser.GameObjects.Image;
+  /** His walk, the same as in a run: stride frames, bob, lean, breathing. */
+  private walker!: Walker;
+  private vel = { x: 0, y: 0 };
   private mortyShadow!: Phaser.GameObjects.Ellipse;
   private prompt!: Phaser.GameObjects.Text;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -157,6 +162,7 @@ export class GarageScene extends Phaser.Scene {
     );
     this.mortyShadow = this.add.ellipse(560, 560, 30, 10, 0x000000, 0.25);
     this.morty = this.add.image(560, 560, this.mortyKey()).setOrigin(0.5, 1).setScale(1.3);
+    this.walker = new Walker(this.morty, SPEED);
   }
 
   private mortyKey(): string {
@@ -170,6 +176,7 @@ export class GarageScene extends Phaser.Scene {
 
   private refreshMorty(): void {
     this.morty.setTexture(this.mortyKey());
+    this.walker.setBase(this.mortyKey());
   }
 
   /** A speech bubble over Rick. */
@@ -201,6 +208,9 @@ export class GarageScene extends Phaser.Scene {
     const dt = Math.min(delta / 1000, 0.05);
     this.t += dt;
     if (this.menu) {
+      // Standing at the workbench (or the TV, or the closet), breathing.
+      this.vel = { x: 0, y: 0 };
+      this.walker.update(dt);
       this.menu.update();
       return;
     }
@@ -211,18 +221,21 @@ export class GarageScene extends Phaser.Scene {
       this.leave();
       return;
     }
-    let mx = (k.D.isDown || k.RIGHT.isDown ? 1 : 0) - (k.A.isDown || k.LEFT.isDown ? 1 : 0);
-    let my = (k.S.isDown || k.DOWN.isDown ? 1 : 0) - (k.W.isDown || k.UP.isDown ? 1 : 0);
-    const len = Math.hypot(mx, my);
-    if (len > 0) {
-      mx /= len;
-      my /= len;
-      this.move(mx * SPEED * dt, my * SPEED * dt);
-      if (mx) this.morty.setFlipX(mx < 0);
-      this.morty.setAngle(Math.sin(this.t * 18) * 5);
-    } else {
-      this.morty.setAngle(0);
-    }
+    const mx = (k.D.isDown || k.RIGHT.isDown ? 1 : 0) - (k.A.isDown || k.LEFT.isDown ? 1 : 0);
+    const my = (k.S.isDown || k.DOWN.isDown ? 1 : 0) - (k.W.isDown || k.UP.isDown ? 1 : 0);
+    // He speeds up, stops and turns the way he does in a run.
+    const v = stepWalk(this.vel, inputDirection(mx, my), SPEED, dt);
+    const m = this.morty;
+    const from = { x: m.x, y: m.y };
+    this.move(v.x * dt, v.y * dt);
+    const dx = m.x - from.x;
+    const dy = m.y - from.y;
+    // Walking into furniture doesn't pile speed up against it.
+    this.vel = { x: dx ? v.x : 0, y: dy ? v.y : 0 };
+    this.walker.moveBy(dx, dy);
+    this.walker.update(dt);
+    // Facing where he walks, holding it through straight up and down.
+    if (Math.abs(this.vel.x) > 0.35 * Math.hypot(this.vel.x, this.vel.y)) m.setFlipX(this.vel.x < 0);
     this.morty.setDepth(this.morty.y);
     this.mortyShadow.setPosition(this.morty.x, this.morty.y - 2).setDepth(this.morty.y - 1);
 

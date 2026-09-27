@@ -52,8 +52,11 @@ export interface SpriteArt {
    * free front arm for holding a weapon); without a pose it draws the plain standing frame.
    */
   draw(g: Graphics, w: number, h: number, pose?: SpritePose): void;
-  /** Bake walk-cycle and weapon-holding frames too (characters who walk around and fight). */
-  poses?: boolean;
+  /**
+   * Bake the walk cycle's frames too: `true` adds the weapon-holding frames as well (characters
+   * you can play), 'walk' only the walk cycle (people who just walk in scenes).
+   */
+  poses?: boolean | 'walk';
 }
 
 /** One frame of a character in motion (SpriteArt.poses). */
@@ -132,6 +135,8 @@ export interface StatusFlags {
   wobblyAim?: boolean;
   /** Inputs randomly drop and swap. */
   scrambled?: boolean;
+  /** He walks with a limp (every other step dips). */
+  limp?: boolean;
 }
 
 export interface StatusDef extends ContentMeta {
@@ -145,6 +150,13 @@ export interface StatusDef extends ContentMeta {
   thenApply?: ContentId;
   /** Also ends when the act ends, whatever its duration (act-flavored statuses). */
   endsWithAct?: boolean;
+  /**
+   * Shows on the character while it lasts, so a slowdown explains itself (goo on his feet, a
+   * stamp on his shirt): a sprite, at his feet, on his body or over his head.
+   */
+  shows?: { art: string; at: 'feet' | 'body' | 'head' };
+  /** Said once, the first time it lands in a run ("Slimed: slower until you're out of the slop"). */
+  explain?: string;
   icon: IconDraw;
 }
 
@@ -977,6 +989,8 @@ export interface BiomeDef {
   floorPattern: 'checker' | 'speckle' | 'grid' | 'planks' | 'blobs';
   /** How the place's walls, furniture and doors are drawn, so it looks like itself. */
   style?: BiomeStyle;
+  /** Outdoors or dusty enough that footsteps kick up dust (grass, dirt, streets). */
+  dusty?: boolean;
   music: string;
 }
 

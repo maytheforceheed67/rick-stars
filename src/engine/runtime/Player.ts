@@ -7,7 +7,7 @@
  * body around. Tweens on `sprite` (scale, angle, alpha) show on the view too.
  */
 import Phaser from 'phaser';
-import { PLAYER } from '../../content/balance';
+import { FEEL, PLAYER } from '../../content/balance';
 import { poseKey, TEXTURE_PAD } from '../art/textures';
 import type { StatBlock } from '../effects/stats';
 import type { Rng } from '../rng';
@@ -15,6 +15,7 @@ import type { Settings } from '../save/save';
 import type { PlayerRef, StatusFlags, TileKind, Vec } from '../types';
 import { FireGate, type RigPose } from './aim';
 import { HeldWeapon } from './HeldWeapon';
+import { inputDirection, stepWalk, WalkCycle } from './motion';
 
 /** Top speed of a knockback, in pixels per second. */
 const MAX_KNOCK = 900;
@@ -55,6 +56,10 @@ export interface PlayerHost {
   godMode(): boolean;
   /** Game seconds this frame (slow motion included). */
   frameDt(): number;
+  /** Whether this floor kicks up dust as he walks (grass, dirt, streets). */
+  floorDusty(): boolean;
+  /** A little puff of dust at his feet. */
+  dust(x: number, y: number, size: number): void;
 }
 
 export class Player implements PlayerRef {
@@ -101,7 +106,21 @@ export class Player implements PlayerRef {
   /** Visual-only offsets: a nudge back when he fires. */
   private nudgeX = 0;
   private nudgeY = 0;
-  private vx = 0;
+  /** His walking velocity (knockback and dashes come on top of it). */
+  private walkVx = 0;
+  private walkVy = 0;
+  private readonly walk = new WalkCycle();
+  /** A squash or stretch that springs back (fractions of his width and height). */
+  private squashX = 0;
+  private squashY = 0;
+  private topSpeed = 1;
+  private wasMoving = false;
+  private dustSteps = 0;
+  private turnDust = 0;
+  private limping = false;
+  /** How far a scene walked him since his view was last drawn (see walkTo). */
+  private sceneDx = 0;
+  private sceneDy = 0;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -194,7 +213,22 @@ export class Player implements PlayerRef {
     this.shadow.setPosition(x, y + 4);
     this.knockVx = 0;
     this.knockVy = 0;
+    this.walkVx = 0;
+    this.walkVy = 0;
     this.syncView();
+  }
+
+  /** A scene walks him a step, to here: he isn't steering, but he walks the walk. */
+  walkTo(x: number, y: number): void {
+    this.sceneDx += x - this.sprite.x;
+    this.sceneDy += y - this.sprite.y;
+    this.sprite.setPosition(x, y);
+    (this.sprite.body as Phaser.Physics.Arcade.Body).reset(x, y);
+    this.shadow.setPosition(x, y + 4);
+    this.knockVx = 0;
+    this.knockVy = 0;
+    this.walkVx = 0;
+    this.walkVy = 0;
   }
 
   setControlLocked(locked: boolean): void {
@@ -213,7 +247,15 @@ export class Player implements PlayerRef {
     this.falling = PLAYER.fallTime;
     this.fallDone = onDone;
     this.dashLeft = 0;
+    this.walkVx = 0;
+    this.walkVy = 0;
     (this.sprite.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+  }
+
+  /** A squash (landing, stopping) or stretch (launching) that springs back. */
+  private squash(x: number, y: number): void {
+    this.squashX = x;
+    this.squashY = y;
   }
 
   /**
@@ -255,6 +297,7 @@ export class Player implements PlayerRef {
         this.falling = 0;
         this.sprite.setScale(1).setAngle(0).setAlpha(1);
         this.shadow.setScale(0.8);
+        this.squash(FEEL.move.squash * 1.5, -FEEL.move.squash * 1.5);
         const done = this.fallDone;
         this.fallDone = null;
         done?.();
@@ -277,10 +320,8 @@ export class Player implements PlayerRef {
       else if (this.scrambleMode === 3) [mx, my] = [0, 0];
     }
     const len = Math.hypot(mx, my);
-    if (len > 1) {
-      mx /= len;
-      my /= len;
-    }
+    // Never faster on a diagonal.
+    ({ x: mx, y: my } = inputDirection(mx, my));
     if (flags.wobblyMove && len > 0) {
       const a = Math.sin(this.t * 3.1) * 0.7;
       [mx, my] = [mx * Math.cos(a) - my * Math.sin(a), mx * Math.sin(a) + my * Math.cos(a)];
@@ -304,9 +345,17 @@ export class Player implements PlayerRef {
       this.dashHits.clear();
       this.dashAge = 0;
       this.perfectUsed = false;
+      // Launching: stretched out along the dash.
+      const M = FEEL.move;
+      if (Math.abs(dx) >= Math.abs(dy)) this.squash(M.dashStretch, -M.dashStretch * 0.6);
+      else this.squash(-M.dashStretch * 0.6, M.dashStretch);
+      this.host.dust(this.sprite.x, this.sprite.y + 8, 1);
       this.host.onDash();
     }
 
+    const tile = this.host.tileUnderPlayer();
+    const top = stats.moveSpeed * (this.sneaking ? PLAYER.sneakSpeedMult : 1) * (tile === 'slow' ? PLAYER.slowTileMult : 1);
+    this.topSpeed = top;
     let vx: number;
     let vy: number;
     if (this.dashLeft > 0) {
@@ -318,13 +367,22 @@ export class Player implements PlayerRef {
         this.ghostTimer = 0.035;
         this.ghost();
       }
+      if (this.dashLeft <= 0) {
+        // Landing: carry on at walking pace the way he dashed, with a little squash.
+        const d = Math.hypot(this.dashVx, this.dashVy) || 1;
+        this.walkVx = (this.dashVx / d) * top;
+        this.walkVy = (this.dashVy / d) * top;
+        this.squash(FEEL.move.squash, -FEEL.move.squash);
+      }
     } else {
-      const tile = this.host.tileUnderPlayer();
-      const speed = stats.moveSpeed * (this.sneaking ? PLAYER.sneakSpeedMult : 1) * (tile === 'slow' ? PLAYER.slowTileMult : 1);
-      vx = mx * speed;
-      vy = my * speed;
+      const before = { x: this.walkVx, y: this.walkVy };
+      const v = stepWalk(before, { x: mx, y: my }, top, dt);
+      this.walkVx = v.x;
+      this.walkVy = v.y;
+      vx = v.x;
+      vy = v.y;
+      this.kickUpDust(before, mx, my, top, dt);
     }
-    this.vx = vx;
     body.setVelocity(vx + this.knockVx, vy + this.knockVy);
 
     if (!this.locked) {
@@ -350,8 +408,38 @@ export class Player implements PlayerRef {
     if (shooting || !this.moving) {
       if (c < -0.2) this.faceLeft = true;
       else if (c > 0.2) this.faceLeft = false;
-    } else if (Math.abs(this.vx) > 0.35 * Math.hypot(vx, vy)) {
-      this.faceLeft = this.vx < 0;
+    } else if (Math.abs(this.walkVx) > 0.35 * Math.hypot(this.walkVx, this.walkVy)) {
+      this.faceLeft = this.walkVx < 0;
+    }
+    this.limping = !!flags.limp;
+  }
+
+  /**
+   * Dust at his feet when he sets off, pulls up or turns sharply, and every few steps on floors
+   * with dust to kick up. Stopping squashes him a little.
+   */
+  private kickUpDust(before: Vec, mx: number, my: number, top: number, dt: number): void {
+    this.turnDust = Math.max(0, this.turnDust - dt);
+    const was = Math.hypot(before.x, before.y);
+    const now = Math.hypot(this.walkVx, this.walkVy);
+    const moving = now > top * 0.3;
+    const x = this.sprite.x;
+    const y = this.sprite.y + 9;
+    if (moving && !this.wasMoving) this.host.dust(x - (this.walkVx / (now || 1)) * 8, y, 0.7);
+    if (!moving && this.wasMoving && was > top * 0.6) {
+      this.host.dust(x + (before.x / was) * 6, y, 0.8);
+      this.squash(FEEL.move.squash, -FEEL.move.squash);
+    }
+    // A sharp turn: the input points well away from where he was going.
+    const input = Math.hypot(mx, my);
+    if (input > 0 && was > top * 0.5 && this.turnDust <= 0 && (before.x * mx + before.y * my) / (was * input) < -0.3) {
+      this.turnDust = 0.2;
+      this.host.dust(x, y, 0.9);
+    }
+    this.wasMoving = moving;
+    if (moving && this.host.floorDusty() && this.walk.steps >= this.dustSteps + FEEL.move.dustEverySteps) {
+      this.dustSteps = this.walk.steps;
+      this.host.dust(x, y, 0.5);
     }
   }
 
@@ -364,22 +452,40 @@ export class Player implements PlayerRef {
     const k = Math.exp(-dt * 30);
     this.nudgeX *= k;
     this.nudgeY *= k;
+    const M = FEEL.move;
     const armed = this.held.armed && this.falling <= 0;
+    // The walk cycle keeps pace with how fast he's really walking (or a scene is walking him).
+    const scripted = this.sceneDx !== 0 || this.sceneDy !== 0;
+    const vx = scripted ? this.sceneDx / Math.max(dt, 1e-3) : this.walkVx;
+    const vy = scripted ? this.sceneDy / Math.max(dt, 1e-3) : this.walkVy;
+    this.sceneDx = 0;
+    this.sceneDy = 0;
+    const speed = Math.hypot(vx, vy);
+    const walking = this.dashLeft <= 0 && speed > this.topSpeed * 0.15 && this.falling <= 0;
+    if (walking) this.walk.advance(speed * dt);
     // The weapon's arm replaces the body's own arm on that side (in the drawing's left/right).
     const side = this.held.side;
     const freeArm = armed ? ((this.faceLeft ? -side : side) as -1 | 1) : 0;
-    const key = this.posed ? poseKey(this.baseKey, 0, freeArm) : this.baseKey;
+    const stride = walking ? this.walk.stride : 0;
+    const key = this.posed ? poseKey(this.baseKey, stride, freeArm) : this.baseKey;
     if (v.texture.key !== key && this.scene.textures.exists(key)) v.setTexture(key);
-    v.setPosition(s.x + this.nudgeX, s.y + this.nudgeY)
+    // A squash or stretch springs back; standing still, he breathes.
+    const spring = Math.exp(-dt / (M.squashSeconds / 3));
+    this.squashX *= spring;
+    this.squashY *= spring;
+    const breath = !walking && this.dashLeft <= 0 ? Math.sin(this.t * Math.PI * 2 * M.breathRate) * M.breathe : 0;
+    const bob = walking ? this.walk.bob(M.bobPx * Math.min(1, speed / Math.max(1, this.topSpeed)), this.limping) : 0;
+    v.setPosition(s.x + this.nudgeX, s.y + this.nudgeY + bob)
       .setOrigin(s.originX, s.originY)
-      .setScale(s.scaleX, s.scaleY)
+      .setScale(s.scaleX * (1 + this.squashX - breath * 0.5), s.scaleY * (1 + this.squashY + breath))
       .setFlipX(this.faceLeft)
       .setDepth(s.y);
     const reduced = this.host.settings().reducedFlash;
     let alpha = s.alpha;
+    // Leaning into the way he's going (and hard into a dash).
     let lean = 0;
     if (this.dashLeft > 0) lean = this.dashVx >= 0 ? 14 : -14;
-    else if (this.moving && !this.locked) lean = Math.sin(this.t * (this.sneaking ? 9 : 18)) * 5;
+    else lean = M.leanDeg * Math.max(-1, Math.min(1, vx / Math.max(1, this.topSpeed)));
     if (this.iframes > 0 && this.dashLeft <= 0) alpha *= reduced ? 0.55 + 0.25 * Math.sin(this.t * 10) : Math.sin(this.t * 45) > 0 ? 1 : 0.3;
     else if (this.sneaking) alpha *= 0.75;
     v.setAngle(s.angle + lean).setAlpha(alpha);

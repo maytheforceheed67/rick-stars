@@ -10,6 +10,8 @@ export const ICON_SIZE = 32;
 
 const STRIDES = [-1, 0, 1] as const;
 const ARMS = [-1, 0, 1] as const;
+/** Just walking: both arms are always drawn. */
+const BOTH_ARMS = [0] as const;
 
 /** The texture for a posed sprite in one pose; standing with both arms down is the plain key. */
 export function poseKey(key: string, stride: number, freeArm: number): string {
@@ -25,12 +27,12 @@ function bakeOne(scene: Phaser.Scene, art: SpriteArt, key: string, pose?: Sprite
   g.destroy();
 }
 
-/** Bakes a sprite, and with `poses` every walk-cycle and weapon-holding frame too. */
+/** Bakes a sprite, and with `poses` its walk-cycle (and weapon-holding) frames too. */
 export function bakeArt(scene: Phaser.Scene, art: SpriteArt): void {
   bakeOne(scene, art, art.key);
   if (!art.poses) return;
   for (const stride of STRIDES) {
-    for (const freeArm of ARMS) {
+    for (const freeArm of art.poses === 'walk' ? BOTH_ARMS : ARMS) {
       if (stride || freeArm) bakeOne(scene, art, poseKey(art.key, stride, freeArm), { stride, freeArm });
     }
   }

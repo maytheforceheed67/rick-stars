@@ -202,6 +202,29 @@ export const FEEL = {
     swingDeg: 70,
     swingSeconds: 0.16,
   },
+  move: {
+    /** From standing to full speed (s): a snappy ramp, not an instant jump. */
+    startSeconds: 0.08,
+    /** From full speed to standing (s): no drifting. */
+    stopSeconds: 0.06,
+    /** Going the other way (or sideways) brakes this fast from full speed (s): harder than a stop. */
+    turnSeconds: 0.035,
+    /** One step covers this much ground (px); the walk cycle and the bob keep pace with the real speed. */
+    stepLength: 34,
+    /** How far the body bobs up on each step (px), and leans into the way he's going (degrees). */
+    bobPx: 2.5,
+    leanDeg: 5,
+    /** A little squash when he stops or lands (fraction), gone in `squashSeconds`. */
+    squash: 0.09,
+    squashSeconds: 0.12,
+    /** A dash stretches him out as he launches (fraction). */
+    dashStretch: 0.2,
+    /** Standing still, he breathes (fraction of his height, breaths per second). */
+    breathe: 0.014,
+    breathRate: 0.45,
+    /** A dust puff every this many steps, on floors where there's dust to kick up. */
+    dustEverySteps: 4,
+  },
   hits: {
     /** A hit fills the enemy solid white for this long (ms, 60-80). */
     flashMs: 70,
@@ -310,6 +333,8 @@ export const PILOT = {
     padRecharge: 45,
   },
   brokenLegs: { speedMult: 0.5, rooms: 2 },
+  /** Stamped by a customs notary: slower for a moment. */
+  stamped: { speedMult: 0.7, seconds: 2 },
   suspicion: {
     scanner: 18,
     runNearAgent: 9,

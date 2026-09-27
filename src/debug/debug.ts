@@ -26,6 +26,8 @@ declare global {
 
 let current: RunScene | null = null;
 let panel: HTMLDivElement | null = null;
+/** The panel's switches outlive a run: a new run starts with them as they were left. */
+const toggles = { god: false, noStatuses: false };
 
 export function ensureDebugApi(game?: Phaser.Game): DebugApi {
   const api: DebugApi = window.rickStars ?? {
@@ -50,6 +52,8 @@ export function ensureDebugApi(game?: Phaser.Game): DebugApi {
 
 export function installDebug(scene: RunScene): void {
   current = scene;
+  scene.godModeOn = toggles.god;
+  if (toggles.noStatuses) scene.setStatusesOff(true);
   const api = ensureDebugApi();
   Object.assign(api, {
     killAll: () => current?.debugKillAll(),
@@ -59,7 +63,13 @@ export function installDebug(scene: RunScene): void {
     useExit: () => current?.debugUseExit(),
     reveal: () => current?.debugRevealMap(),
     god: (on = true) => {
+      toggles.god = on;
       if (current) current.godModeOn = on;
+    },
+    /** No statuses: clears Morty's and blocks new ones, to tune movement on its own. */
+    noStatuses: (on = true) => {
+      toggles.noStatuses = on;
+      current?.setStatusesOff(on);
     },
     give: (id: string) => current?.giveItem(id),
     spawn: (id: string, elite = false) => current?.debugSpawnEnemy(id, elite),
@@ -132,6 +142,7 @@ function buildPanel(): void {
 
   row(
     check('God mode', (on) => api().god(on)),
+    check('No statuses', (on) => api().noStatuses(on)),
     check('Hitboxes', (on) => {
       const s = current;
       if (!s) return;

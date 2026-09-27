@@ -3,11 +3,16 @@
  * Scary Terry, the bosses and the props. All original art drawn in code.
  */
 import { blob, dot, eye, INK, mouth, shade, stroke, wonkyPoly, wonkyRect, type EyeMood } from '../../../engine/art/draw';
-import type { Graphics, SpriteArt } from '../../../engine/types';
-import { drawPerson, type PersonStyle } from '../../shared/art';
+import type { Graphics, SpriteArt, SpritePose } from '../../../engine/types';
+import { armSwing, drawPerson, type PersonStyle } from '../../shared/art';
 import { GOLDENFOLD } from '../s01e01-pilot/art';
 
 const art = (key: string, width: number, height: number, draw: (g: Graphics, w: number, h: number) => void): SpriteArt => ({ key, width, height, draw });
+/** Someone who walks in scenes: their walk cycle's frames are baked too. */
+const walker = (key: string, width: number, height: number, draw: (g: Graphics, w: number, h: number, pose?: SpritePose) => void): SpriteArt => ({ key, width, height, poses: 'walk', draw });
+
+/** Four legs trot in diagonal pairs: which ones are up this frame (by index, front to back). */
+const legUp = (pose: SpritePose | undefined, i: number): boolean => !!pose?.stride && i % 2 === (pose.stride === 1 ? 0 : 1);
 
 /** Where drawPerson puts the head, so hats and masks can sit on it. */
 function headOf(w: number, h: number, build: PersonStyle['build'] = 'kid'): { cx: number; cy: number; r: number } {
@@ -57,7 +62,7 @@ function dogHelmet(g: Graphics, cx: number, cy: number, r: number, seed: number)
 }
 
 /** A chibi dog standing (or, with a suit, sitting in a little robot body), feet at the bottom. */
-export function drawDog(g: Graphics, w: number, h: number, s: DogStyle): void {
+export function drawDog(g: Graphics, w: number, h: number, s: DogStyle, pose?: SpritePose): void {
   const cx = w / 2;
   const ear = s.ear ?? shade(s.fur, -0.2);
   const bodyY = h * 0.72;
@@ -68,9 +73,10 @@ export function drawDog(g: Graphics, w: number, h: number, s: DogStyle): void {
   stroke(g, [[cx + bodyRx * 0.8, bodyY - 2], [cx + bodyRx * 1.15, bodyY - bodyRy * 0.9], [cx + bodyRx * 1.2, bodyY - bodyRy * 1.3]], s.fur, 2.5);
   // Legs
   const legC = s.suit ?? s.fur;
-  for (const lx of [-0.55, -0.2, 0.2, 0.55]) {
-    wonkyRect(g, cx + bodyRx * lx - 4, bodyY + bodyRy * 0.3, 8, h - (bodyY + bodyRy * 0.3) - 2, { fill: legC, seed: s.seed + Math.round(lx * 10), radius: 3, lineWidth: 2 });
-  }
+  [-0.55, -0.2, 0.2, 0.55].forEach((lx, i) => {
+    const up = legUp(pose, i) ? 3 : 0;
+    wonkyRect(g, cx + bodyRx * lx - 4, bodyY + bodyRy * 0.3, 8, h - (bodyY + bodyRy * 0.3) - 2 - up, { fill: legC, seed: s.seed + Math.round(lx * 10), radius: 3, lineWidth: 2 });
+  });
   // Body
   if (s.curly) for (let i = 0; i < 6; i++) blob(g, cx - bodyRx * 0.7 + i * bodyRx * 0.28, bodyY - bodyRy * 0.4, bodyRy * 0.55, bodyRy * 0.55, { fill: s.fur, seed: s.seed + 20 + i, lineWidth: 2 });
   blob(g, cx, bodyY, bodyRx, bodyRy, { fill: s.fur, seed: s.seed + 2, wobble: s.curly ? 0.12 : 0.05, lineWidth: 2.5 });
@@ -128,13 +134,13 @@ export function drawDog(g: Graphics, w: number, h: number, s: DogStyle): void {
 export const SNUFFLES_FUR = 0xf4efe4;
 export const SNUFFLES_EAR = 0xe3d3bc;
 
-export const snufflesSprite = art('snuffles', 44, 42, (g, w, h) => drawDog(g, w, h, { seed: 1201, fur: SNUFFLES_FUR, ear: SNUFFLES_EAR, tongue: true }));
-export const snufflesHelmetSprite = art('snuffles-helmet', 44, 46, (g, w, h) => drawDog(g, w, h, { seed: 1202, fur: SNUFFLES_FUR, ear: SNUFFLES_EAR, helmet: true }));
-export const snufflesArmSprite = art('snuffles-arm', 52, 48, (g, w, h) => drawDog(g, w, h, { seed: 1203, fur: SNUFFLES_FUR, ear: SNUFFLES_EAR, helmet: true, arm: true, eyes: 'angry' }));
+export const snufflesSprite = walker('snuffles', 44, 42, (g, w, h, pose) => drawDog(g, w, h, { seed: 1201, fur: SNUFFLES_FUR, ear: SNUFFLES_EAR, tongue: true }, pose));
+export const snufflesHelmetSprite = walker('snuffles-helmet', 44, 46, (g, w, h, pose) => drawDog(g, w, h, { seed: 1202, fur: SNUFFLES_FUR, ear: SNUFFLES_EAR, helmet: true }, pose));
+export const snufflesArmSprite = walker('snuffles-arm', 52, 48, (g, w, h, pose) => drawDog(g, w, h, { seed: 1203, fur: SNUFFLES_FUR, ear: SNUFFLES_EAR, helmet: true, arm: true, eyes: 'angry' }, pose));
 /** Snowball as he appears in scenes: in the robot suit, not the full war machine. */
-export const snowballSprite = art('snowball', 52, 54, (g, w, h) => drawDog(g, w, h, { seed: 1204, fur: SNUFFLES_FUR, ear: SNUFFLES_EAR, helmet: true, suit: 0x9aa3b5, eyes: 'angry' }));
-export const dogTrooperSprite = art('dog-trooper', 46, 48, (g, w, h) => {
-  drawDog(g, w, h, { seed: 1211, fur: 0xb07a4a, ear: 0x7a4f2c, helmet: true, suit: 0x5d6b7b, eyes: 'angry' });
+export const snowballSprite = walker('snowball', 52, 54, (g, w, h, pose) => drawDog(g, w, h, { seed: 1204, fur: SNUFFLES_FUR, ear: SNUFFLES_EAR, helmet: true, suit: 0x9aa3b5, eyes: 'angry' }, pose));
+export const dogTrooperSprite = walker('dog-trooper', 46, 48, (g, w, h, pose) => {
+  drawDog(g, w, h, { seed: 1211, fur: 0xb07a4a, ear: 0x7a4f2c, helmet: true, suit: 0x5d6b7b, eyes: 'angry' }, pose);
   // A laser blaster clipped to the suit.
   wonkyRect(g, w * 0.66, h * 0.6, 14, 6, { fill: 0x3d4a5c, seed: 1212, radius: 2, lineWidth: 2 });
   dot(g, w * 0.66 + 14, h * 0.6 + 3, 2.5, 0xff4a3d);
@@ -153,7 +159,7 @@ function fedora(g: Graphics, cx: number, cy: number, r: number, seed: number, co
 const TERRY_STRIPES = [0x8b2323, 0x4f5a2a, 0x8b2323, 0x4f5a2a] as const;
 
 /** Scary Terry: lanky, scarred, striped sweater, brown hat, blades for fingers. */
-export function drawTerry(g: Graphics, w: number, h: number, seed = 1301): void {
+export function drawTerry(g: Graphics, w: number, h: number, seed = 1301, pose?: SpritePose): void {
   drawPerson(g, w, h, {
     seed,
     skin: 0xd98f7f,
@@ -167,7 +173,7 @@ export function drawTerry(g: Graphics, w: number, h: number, seed = 1301): void 
     eyes: 'angry',
     mouth: 'grit',
     brow: 0x5a2a20,
-  });
+  }, pose);
   const hd = headOf(w, h, 'adult');
   // Scars
   for (const [dx, dy, rr] of [[-0.45, -0.35, 0.16], [0.4, 0.45, 0.12], [0.1, -0.6, 0.1]] as const) {
@@ -175,20 +181,20 @@ export function drawTerry(g: Graphics, w: number, h: number, seed = 1301): void 
     g.fillEllipse(hd.cx + dx * hd.r, hd.cy + dy * hd.r, hd.r * rr * 2, hd.r * rr * 1.4);
   }
   fedora(g, hd.cx, hd.cy, hd.r, seed + 50);
-  // Finger blades on his right hand.
+  // Finger blades on his right hand, swinging with it.
   const hx = w * 0.84;
-  const hy = h * 0.76;
+  const hy = h * 0.76 + armSwing(pose, 1);
   for (let i = 0; i < 4; i++) {
     stroke(g, [[hx - 3 + i * 2.5, hy], [hx + 2 + i * 3, hy + 13]], INK, 3.5);
     stroke(g, [[hx - 3 + i * 2.5, hy], [hx + 2 + i * 3, hy + 13]], 0xdfe6ee, 1.8);
   }
 }
 
-export const scaryTerrySprite = art('scary-terry', 48, 70, (g, w, h) => drawTerry(g, w, h));
+export const scaryTerrySprite = walker('scary-terry', 48, 70, (g, w, h, pose) => drawTerry(g, w, h, 1301, pose));
 
 /** Terry as a kid in his own dream: the little hat, the sweater, and no pants. */
-export const littleTerrySprite = art('little-terry', 40, 54, (g, w, h) => {
-  drawPerson(g, w, h, { seed: 1311, skin: 0xf0c6a8, hair: 0x3a2a20, hairStyle: 'buzz', shirt: 0x8b2323, stripe: TERRY_STRIPES, pants: 0xf0c6a8, shoes: 0x3b2f2a, eyes: 'sleepy', mouth: 'frown' });
+export const littleTerrySprite = walker('little-terry', 40, 54, (g, w, h, pose) => {
+  drawPerson(g, w, h, { seed: 1311, skin: 0xf0c6a8, hair: 0x3a2a20, hairStyle: 'buzz', shirt: 0x8b2323, stripe: TERRY_STRIPES, pants: 0xf0c6a8, shoes: 0x3b2f2a, eyes: 'sleepy', mouth: 'frown' }, pose);
   // Boxer shorts with little hearts, where the pants should be.
   wonkyRect(g, w * 0.3, h * 0.73, w * 0.4, h * 0.1, { fill: 0xf4efe6, seed: 1312, radius: 2, lineWidth: 2 });
   dot(g, w * 0.4, h * 0.78, 1.8, 0xe0484d);
@@ -197,20 +203,21 @@ export const littleTerrySprite = art('little-terry', 40, 54, (g, w, h) => {
   fedora(g, hd.cx, hd.cy, hd.r * 0.85, 1313);
 });
 
-export const littleGirlSprite = art('little-girl', 40, 54, (g, w, h) =>
-  drawPerson(g, w, h, { seed: 1321, skin: 0xf6d7bd, hair: 0xf2d16b, hairStyle: 'ponytail', shirt: 0xf2a7c9, pants: 0xf2a7c9, shoes: 0xffffff, lashes: true, mouth: 'smile', eyes: 'happy' }),
+export const littleGirlSprite = walker('little-girl', 40, 54, (g, w, h, pose) =>
+  drawPerson(g, w, h, { seed: 1321, skin: 0xf6d7bd, hair: 0xf2d16b, hairStyle: 'ponytail', shirt: 0xf2a7c9, pants: 0xf2a7c9, shoes: 0xffffff, lashes: true, mouth: 'smile', eyes: 'happy' }, pose),
 );
 
 /** The centaur bouncer: a horse's body, a bouncer's torso, sunglasses, a STAFF shirt. */
-export const centaurSprite = art('centaur', 76, 78, (g, w, h) => {
+export const centaurSprite = walker('centaur', 76, 78, (g, w, h, pose) => {
   const coat = 0x8a5a3a;
   // Tail and back legs
   stroke(g, [[w * 0.88, h * 0.55], [w * 0.97, h * 0.72], [w * 0.93, h * 0.84]], INK, 7);
   stroke(g, [[w * 0.88, h * 0.55], [w * 0.97, h * 0.72], [w * 0.93, h * 0.84]], 0x3a2418, 4);
-  for (const lx of [0.3, 0.42, 0.66, 0.8]) {
-    wonkyRect(g, w * lx - 4, h * 0.68, 8, h * 0.3, { fill: coat, seed: 1331 + Math.round(lx * 10), radius: 3, lineWidth: 2 });
-    wonkyRect(g, w * lx - 5, h - 7, 10, 6, { fill: 0x2a2020, seed: 1336 + Math.round(lx * 10), radius: 2, lineWidth: 2 });
-  }
+  [0.3, 0.42, 0.66, 0.8].forEach((lx, i) => {
+    const up = legUp(pose, i) ? 3.5 : 0;
+    wonkyRect(g, w * lx - 4, h * 0.68, 8, h * 0.3 - up, { fill: coat, seed: 1331 + Math.round(lx * 10), radius: 3, lineWidth: 2 });
+    wonkyRect(g, w * lx - 5, h - 7 - up, 10, 6, { fill: 0x2a2020, seed: 1336 + Math.round(lx * 10), radius: 2, lineWidth: 2 });
+  });
   blob(g, w * 0.58, h * 0.6, w * 0.32, h * 0.16, { fill: coat, seed: 1340, wobble: 0.04, lineWidth: 2.5 });
   // Human torso rising from the front of the horse.
   wonkyRect(g, w * 0.16, h * 0.3, w * 0.28, h * 0.32, { fill: 0x1c1a26, seed: 1341, radius: 6, lineWidth: 2.5 });
@@ -225,8 +232,8 @@ export const centaurSprite = art('centaur', 76, 78, (g, w, h) => {
   mouth(g, w * 0.3, h * 0.26, 7, 'flat');
 });
 
-export const mrsPancakesSprite = art('mrs-pancakes', 44, 62, (g, w, h) =>
-  drawPerson(g, w, h, { seed: 1351, skin: 0xf3d0b5, hair: 0xf5d98b, hairStyle: 'bob', shirt: 0xd8327f, pants: 0x3a2e4a, shoes: 0xd8327f, build: 'adult', lashes: true, lips: 0xd8323f, mouth: 'smile' }),
+export const mrsPancakesSprite = walker('mrs-pancakes', 44, 62, (g, w, h, pose) =>
+  drawPerson(g, w, h, { seed: 1351, skin: 0xf3d0b5, hair: 0xf5d98b, hairStyle: 'bob', shirt: 0xd8327f, pants: 0x3a2e4a, shoes: 0xd8327f, build: 'adult', lashes: true, lips: 0xd8323f, mouth: 'smile' }, pose),
 );
 
 // ---- enemies: Goldenfold's dream -----------------------------------------------------------------

@@ -401,6 +401,7 @@ export function validateRegistry(reg: Registry): string[] {
     if (e.stalker && !(e.stalker.staggerHits >= 1 && e.stalker.staggerSeconds > 0)) err(`enemy "${e.id}": stalker needs staggerHits >= 1 and staggerSeconds > 0`);
   }
   for (const p of reg.pickups.values()) if (!reg.sprites.has(p.art)) err(`pickup "${p.id}" art "${p.art}" doesn't exist`);
+  for (const st of reg.statuses.values()) if (st.shows && !artExists(st.shows.art)) err(`status "${st.id}": art "${st.shows.art}" doesn't exist`);
   for (const sr of reg.specialRooms.values()) {
     for (const t of sr.templates) if (!reg.templates.has(t)) err(`special room "${sr.id}": template "${t}" doesn't exist`);
   }

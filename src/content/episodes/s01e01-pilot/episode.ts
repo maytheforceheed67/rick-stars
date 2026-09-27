@@ -18,7 +18,7 @@ import { PILOT_MUSIC } from './music';
 import { PILOT_TEMPLATES } from './rooms';
 import { PILOT_WEAPON_ART, PILOT_WEAPONS } from './weapons';
 import { PILOT_SPECIAL_ROOMS } from './specialRooms';
-import { PILOT_STATUSES } from './statuses';
+import { PILOT_STATUS_ART, PILOT_STATUSES } from './statuses';
 
 const megaFruit: PickupDef = {
   id: 'mega-fruit',
@@ -62,7 +62,7 @@ export const pilot: EpisodeDef = {
     backdrops: PILOT_BACKDROPS,
     templates: PILOT_TEMPLATES,
     scripts: PILOT_SCRIPTS,
-    sprites: [...PILOT_PROP_ART, ...PILOT_HAZARD_ART, ...PILOT_WEAPON_ART, ...PILOT_ITEM_ART],
+    sprites: [...PILOT_PROP_ART, ...PILOT_HAZARD_ART, ...PILOT_WEAPON_ART, ...PILOT_ITEM_ART, ...PILOT_STATUS_ART],
     music: PILOT_MUSIC,
   },
 };

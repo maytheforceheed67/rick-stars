@@ -93,6 +93,7 @@ export const C35_BIOME: BiomeDef = {
     door: 0x6a4c93,
   },
   floorPattern: 'blobs',
+  dusty: true,
   music: '35c',
 };
 

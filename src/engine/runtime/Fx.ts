@@ -139,6 +139,12 @@ export class Fx {
     this.scene.tweens.add({ targets: img, scale: to, alpha: 0, duration: ms, ease: 'Cubic.easeOut', onComplete: () => img.destroy() });
   }
 
+  /** Dust kicked up at someone's feet (drawn behind them, not glowing). */
+  dust(x: number, y: number, size: number, color: number): void {
+    const img = this.scene.add.image(x, y, 'fx-puff').setDepth(y - 14).setTint(color).setAlpha(0.75).setScale(0.35 * size);
+    this.scene.tweens.add({ targets: img, scale: 0.95 * size, alpha: 0, y: y - 7, duration: 340, ease: 'Cubic.easeOut', onComplete: () => img.destroy() });
+  }
+
   /** An expanding ring: impacts, kills, spawn warnings. */
   ring(x: number, y: number, color: number, radius: number, ms: number, width = 3): void {
     const c = this.scene.add.circle(x, y, radius, color, 0).setStrokeStyle(width, color, 0.9).setDepth(4600).setScale(0.25);

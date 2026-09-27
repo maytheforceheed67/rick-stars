@@ -275,10 +275,19 @@ function drawOutfit(g: Graphics, o: OutfitStyle, shirt: number, skin: number, cx
   }
 }
 
-/** Full-body chibi sprite, feet at the bottom of the w x h box. */
 /**
- * Draws a person standing, or with a `pose`: one foot up mid-stride (the arms swinging against
- * the legs), and/or one arm left out because a held weapon's arm is drawn in its place.
+ * How much lower a hand hangs mid-stride. Arms swing against the legs: the one opposite the
+ * lifted foot comes forward, a little lower. For anything held in a hand (Frank's switchblade).
+ */
+export function armSwing(pose: SpritePose | undefined, side: -1 | 1): number {
+  const stride = pose?.stride ?? 0;
+  return stride === 0 ? 0 : stride === side ? -1 : 1.5;
+}
+
+/**
+ * Full-body chibi sprite, feet at the bottom of the w x h box. Standing, or with a `pose`: one
+ * foot up mid-stride (the arms swinging against the legs), and/or one arm left out because a
+ * held weapon's arm is drawn in its place.
  */
 export function drawPerson(g: Graphics, w: number, h: number, s: PersonStyle, pose?: SpritePose): void {
   const cx = w / 2;
@@ -312,10 +321,9 @@ export function drawPerson(g: Graphics, w: number, h: number, s: PersonStyle, po
   const armColor = s.coat ?? (bare ? s.skin : s.shirt);
   const armY = torsoTop + (torsoBot - torsoTop) * 0.45;
   const armH = (torsoBot - torsoTop) * 0.42;
-  for (const side of [-1, 1]) {
+  for (const side of [-1, 1] as const) {
     if (side === freeArm) continue;
-    // Arms swing against the legs: the one opposite the lifted foot comes forward (a little lower).
-    const swing = stride === 0 ? 0 : stride === side ? -1 : 1.5;
+    const swing = armSwing(pose, side);
     blob(g, cx + side * bodyW * 0.55, armY + swing, bodyW * 0.14, armH, { fill: armColor, seed: s.seed + (side < 0 ? 4 : 5), lineWidth: 2.5 });
     if (bare && s.sleeves === 'short') blob(g, cx + side * bodyW * 0.53, armY + swing - armH * 0.55, bodyW * 0.15, armH * 0.42, { fill: s.shirt, seed: s.seed + (side < 0 ? 12 : 13), lineWidth: 2 });
     dot(g, cx + side * bodyW * 0.56, torsoBot - 2 + swing, bodyW * 0.1, s.skin);

@@ -8,6 +8,7 @@ import Phaser from 'phaser';
 import { TEXTURE_PAD } from '../art/textures';
 import type { ContentId, SceneSpot, SceneStep, Vec } from '../types';
 import type { Fx } from './Fx';
+import { Walker } from './Walker';
 
 export interface StageHost {
   readonly scene: Phaser.Scene;
@@ -15,6 +16,7 @@ export interface StageHost {
   /** The playable character's id: that actor is the player himself. */
   playerId(): ContentId;
   playerPos(): Vec;
+  /** Walks the player a step, to here (a scene has him walking). */
   movePlayer(x: number, y: number): void;
   facePlayer(left: boolean): void;
   /** A character's world sprite key, if it has one. */
@@ -39,6 +41,8 @@ interface Actor {
   shadow: Phaser.GameObjects.Ellipse;
   /** Where their speech bubbles go. */
   anchor: () => Vec | null;
+  /** Their walk: stride frames, bob and lean as they move, breathing as they stand. */
+  walker: Walker;
 }
 
 /** Pixels per second people walk at in scenes. */
@@ -112,23 +116,31 @@ export class Stage {
    * Walks a character toward a spot for one frame (companions trailing Morty). Returns whether
    * they moved.
    */
-  follow(who: ContentId, target: Vec, dt: number, t: number): boolean {
+  follow(who: ContentId, target: Vec, dt: number): boolean {
     const a = this.actors.get(who);
     if (!a) return false;
     const dx = target.x - a.img.x;
     const dy = target.y - a.img.y;
     const d = Math.hypot(dx, dy);
-    if (d < 6) {
-      a.img.setAngle(0);
-      return false;
-    }
+    if (d < 6) return false;
     const k = 1 - Math.exp(-dt * 4.5);
-    const x = a.img.x + dx * k;
-    const y = a.img.y + dy * k;
-    a.img.setPosition(x, y).setDepth(y).setAngle(Math.sin(t * 16) * 5);
+    this.step(a, a.img.x + dx * k, a.img.y + dy * k);
     if (Math.abs(dx) > 4) a.img.setFlipX(dx < 0);
-    a.shadow.setPosition(x, y + 12);
     return true;
+  }
+
+  /** Once a frame, after everyone has moved: each actor's walk (or breathing, standing still). */
+  update(dt: number): void {
+    const tweens = this.host.scene.tweens;
+    for (const a of this.actors.values()) a.walker.update(dt, tweens.isTweening(a.img));
+  }
+
+  /** Moves an actor to a spot this frame, walking. */
+  private step(a: Actor, x: number, y: number): void {
+    // A skipped scene jumps everyone to their marks: that isn't walking.
+    if (!this.skipping) a.walker.moveBy(x - a.img.x, y - a.img.y);
+    a.img.setPosition(x, y).setDepth(y);
+    a.shadow.setPosition(x, y + 12);
   }
 
   /** Removes every actor and drops any scene in progress (leaving the room). */
@@ -219,6 +231,7 @@ export class Stage {
     a.img.setTexture(key);
     const fh = a.img.frame.height;
     a.img.setOrigin(0.5, (fh - TEXTURE_PAD - 12) / fh);
+    a.walker.setBase(key);
   }
 
   private delay(seconds: number, done: () => void): void {
@@ -317,27 +330,14 @@ export class Stage {
     const dist = Math.hypot(to.x - from.x, to.y - from.y);
     if (dist < 2) return done();
     this.face(who, to.x < from.x);
-    const proxy = { x: from.x, y: from.y, t: 0 };
+    const proxy = { x: from.x, y: from.y };
     const isPlayer = who === this.host.playerId();
     const actor = this.actors.get(who);
     const update = () => {
       if (isPlayer) this.host.movePlayer(proxy.x, proxy.y);
-      else if (actor) {
-        actor.img.setPosition(proxy.x, proxy.y).setDepth(proxy.y).setAngle(Math.sin(proxy.t * 16) * 5);
-        actor.shadow.setPosition(proxy.x, proxy.y + 12);
-      }
+      else if (actor) this.step(actor, proxy.x, proxy.y);
     };
-    this.tweenTo(
-      proxy,
-      { x: to.x, y: to.y, t: dist / speed },
-      (dist / speed) * 1000,
-      () => {
-        actor?.img.setAngle(0);
-        done();
-      },
-      update,
-      'Linear',
-    );
+    this.tweenTo(proxy, { x: to.x, y: to.y }, (dist / speed) * 1000, done, update, 'Linear');
   }
 
   private emote(who: ContentId, emote: 'jump' | 'shake' | 'shock', done: () => void): void {
@@ -442,7 +442,7 @@ export class Stage {
     img.setOrigin(0.5, (fh - TEXTURE_PAD - 12) / fh);
     const shadow = scene.add.ellipse(at.x, at.y + 12, 34, 10, 0x000000, 0.22).setDepth(-400);
     const anchor = () => (img.active ? { x: img.x, y: img.y - img.displayHeight * img.originY - 6 } : null);
-    const actor = { img, shadow, anchor };
+    const actor = { img, shadow, anchor, walker: new Walker(img, WALK_SPEED) };
     this.actors.set(who, actor);
     this.host.setAnchor(who, anchor);
     return actor;

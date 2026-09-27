@@ -121,6 +121,12 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   objects!: WorldObjects;
   enemies: Enemy[] = [];
   godModeOn = false;
+  /** Debug: no statuses at all (clears them and blocks new ones), to tune movement on its own. */
+  statusesOff = false;
+  /** Statuses (and the slow floor) that have explained themselves already this run. */
+  private explained = new Set<string>();
+  /** What's showing on Morty for his statuses: goo on his feet, a stamp on his shirt. */
+  private statusMarks = new Map<string, Phaser.GameObjects.Image>();
 
   private initData!: RunSceneData;
   private hud!: HudApi;
@@ -231,6 +237,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     // Scenes are reused between runs, so reset every piece of per-run state here.
     this.enemies = [];
     this.godModeOn = false;
+    this.statusesOff = false;
+    this.explained = new Set();
+    this.statusMarks = new Map();
     this.roomView = null;
     this.roomInfoObj = null;
     this.scriptApi = null;
@@ -321,8 +330,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.fx = new Fx(this, () => this.settings());
     this.objects = new WorldObjects(this);
     this.player = new Player(this, this, this.playerTexture(), 0, 0);
-    // After the player's own view is placed each frame: what rides on him (his hat).
-    this.events.on(Phaser.Scenes.Events.POST_UPDATE, this.rideAlong, this);
+    // After the player's own view is placed each frame: what rides on him (his hat), and the walk
+    // of everyone in a scene.
+    this.events.on(Phaser.Scenes.Events.POST_UPDATE, this.lateUpdate, this);
     this.stage = this.makeStage();
     this.orbiters = new Orbiters(this.companionHost());
     this.ctx = this.buildCtx();
@@ -357,12 +367,14 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   private cleanup(): void {
     // Phaser tears down this scene's objects itself; this just releases what it doesn't know about.
-    this.events.off(Phaser.Scenes.Events.POST_UPDATE, this.rideAlong, this);
+    this.events.off(Phaser.Scenes.Events.POST_UPDATE, this.lateUpdate, this);
     this.companions.forEach((c) => c.destroy());
     this.companions = [];
     this.orbiters?.destroy();
     this.accessory?.destroy();
     this.accessory = null;
+    this.statusMarks.forEach((m) => m.destroy());
+    this.statusMarks.clear();
     this.chargeRing?.destroy();
     this.chargeRing = null;
     this.timeFactor = 1;
@@ -423,6 +435,17 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   flags(): StatusFlags {
     return this.run.statuses.flags();
+  }
+
+  floorDusty(): boolean {
+    return !!this.roomBiome?.dusty;
+  }
+
+  /** Dust at Morty's feet, the color of the floor he's on (only lighter). */
+  dust(x: number, y: number, size: number): void {
+    const f = this.roomBiome?.palette.floor ?? 0xcfc6b4;
+    const lift = (c: number) => Math.round(c + (255 - c) * 0.45);
+    this.fx.dust(x, y, size, (lift((f >> 16) & 0xff) << 16) | (lift((f >> 8) & 0xff) << 8) | lift(f & 0xff));
   }
 
   tileUnderPlayer(): TileKind {
@@ -612,7 +635,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     // He doesn't walk through walls; he waits where he is until Morty moves on.
     const view = this.roomView;
     const free = !view || (view.tileAt(target.x, target.y) !== 'wall' && view.tileAt(target.x, target.y) !== 'block');
-    if (free) this.stage.follow('rick', target, dt, this.run.time);
+    if (free) this.stage.follow('rick', target, dt);
     if (this.run.time - this.rickTalkAt > 26) this.rickSays('idle');
   }
 
@@ -749,23 +772,69 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     p.held.nextThrown = () => (looks.length ? looks[this.shotsFired % looks.length] : null);
   }
 
-  /** Things that ride on Morty, placed after his view each frame: an item's hat or helmet. */
+  /** After physics and tweens have moved everyone this frame. */
+  private lateUpdate(): void {
+    this.rideAlong();
+    this.stage?.update(this.frameDelta);
+  }
+
+  /**
+   * Things that ride on Morty, placed after his view each frame: an item's hat or helmet, and
+   * what his statuses look like on him (goo on his feet, a stamp on his shirt, wading ripples).
+   */
   private rideAlong(): void {
     const p = this.player;
-    if (!this.accessory || !p) return;
+    if (!p || !this.run) return;
     const v = p.view;
-    const top = v.y - v.displayHeight * v.originY + TEXTURE_PAD + (this.look.dy ?? 0);
-    // Tilt with him, around his feet.
-    const r = v.rotation;
-    const dy = top - v.y;
-    this.accessory
-      .setPosition(v.x - Math.sin(r) * dy, v.y + Math.cos(r) * dy)
-      .setRotation(r)
-      .setDepth(v.depth + 1)
-      .setFlipX(v.flipX)
-      .setAlpha(v.alpha)
-      .setScale(v.scaleX, v.scaleY)
-      .setVisible(p.falling <= 0 && v.visible);
+    const shown = p.falling <= 0 && v.visible;
+    if (this.accessory) {
+      const top = v.y - v.displayHeight * v.originY + TEXTURE_PAD + (this.look.dy ?? 0);
+      // Tilt with him, around his feet.
+      const r = v.rotation;
+      const dy = top - v.y;
+      this.accessory
+        .setPosition(v.x - Math.sin(r) * dy, v.y + Math.cos(r) * dy)
+        .setRotation(r)
+        .setDepth(v.depth + 1)
+        .setFlipX(v.flipX)
+        .setAlpha(v.alpha)
+        .setScale(v.scaleX, v.scaleY)
+        .setVisible(shown);
+    }
+    const marks: [string, string, 'feet' | 'body' | 'head'][] = [];
+    for (const st of this.run.statuses.list()) if (st.def.shows) marks.push([st.def.id, st.def.shows.art, st.def.shows.at]);
+    // Wading through a slow floor shows too, in the floor's own color.
+    const wading = this.roomView && this.tileUnderPlayer() === 'slow';
+    if (wading) {
+      marks.push(['__slow-floor', 'fx-ripple', 'feet']);
+      this.explainOnce('slow-floor', 'Slow floor: wading through it slows you down');
+    }
+    const live = new Set<string>();
+    for (const [id, art, at] of marks) {
+      if (!this.textures.exists(art)) continue;
+      live.add(id);
+      let img = this.statusMarks.get(id);
+      if (!img) {
+        img = this.add.image(0, 0, art);
+        if (id === '__slow-floor') img.setTint(this.roomBiome?.palette.slow ?? 0x9fdcff);
+        this.statusMarks.set(id, img);
+      }
+      const top = v.y - v.displayHeight * v.originY + TEXTURE_PAD;
+      const y = at === 'feet' ? v.y + 10 : at === 'head' ? top - 10 : v.y - v.displayHeight * 0.2;
+      const pulse = id === '__slow-floor' ? 1 + 0.08 * Math.sin(this.run.time * 6) : 1;
+      img
+        .setPosition(v.x, y)
+        .setScale(pulse)
+        .setDepth(at === 'feet' ? v.depth + 0.05 : v.depth + 0.6)
+        .setFlipX(v.flipX)
+        .setAlpha(v.alpha)
+        .setVisible(shown);
+    }
+    for (const [id, img] of this.statusMarks) {
+      if (live.has(id)) continue;
+      img.destroy();
+      this.statusMarks.delete(id);
+    }
   }
 
   private showMarker(art: string, x: number, y: number, seconds: number): void {
@@ -995,7 +1064,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     run.floor = floor;
     run.rooms = floor.rooms.map((r) => freshRoomState(r.kind));
     run.stage = -1;
-    for (const s of act.startStatuses ?? []) run.statuses.add(s);
+    if (!this.statusesOff) for (const s of act.startStatuses ?? []) run.statuses.add(s);
     this.prepareWeapon(index);
     this.invalidateStats();
     // A cutaway to another character leaves Morty's buddies and looks behind (and brings them back).
@@ -2882,7 +2951,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       fx: this.fx,
       playerId: () => this.run.act.playable,
       playerPos: () => ({ x: this.player.x, y: this.player.y }),
-      movePlayer: (x, y) => this.player.setPosition(x, y),
+      movePlayer: (x, y) => this.player.walkTo(x, y),
       facePlayer: (left) => this.player.face(left),
       spriteKey: (who) => this.reg.characters.get(who)?.sprite?.key ?? null,
       say: (who, text, seconds) => this.say(who, text, seconds),
@@ -3118,8 +3187,26 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
 
   private applyStatus(id: ContentId): void {
     const def = this.reg.statuses.get(id);
-    if (!def) return;
-    if (this.run.statuses.add(id)) this.hud.toast(def.name, { color: def.positive ? 0x97ce4c : 0xff8a3d, sub: def.description });
+    if (!def || this.statusesOff) return;
+    if (this.run.statuses.add(id)) {
+      // A status that explains itself says why once; after that, the mark on Morty says it.
+      if (def.explain) this.explainOnce(id, def.explain, def.positive);
+      else this.hud.toast(def.name, { color: def.positive ? 0x97ce4c : 0xff8a3d, sub: def.description });
+    }
+    this.invalidateStats();
+  }
+
+  /** A short toast saying why something's happening, the first time in a run. */
+  private explainOnce(key: string, text: string, positive = false): void {
+    if (this.explained.has(key)) return;
+    this.explained.add(key);
+    this.hud.toast(text, { color: positive ? 0x97ce4c : 0xff8a3d, seconds: 2.4 });
+  }
+
+  /** Debug: turn statuses off (clearing any he has) or back on. */
+  setStatusesOff(off: boolean): void {
+    this.statusesOff = off;
+    if (off) this.run.statuses.clear();
     this.invalidateStats();
   }
 

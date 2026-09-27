@@ -58,6 +58,7 @@ export const SMITH_GARAGE: BiomeDef = {
     door: 0x5a5a6a,
   },
   floorPattern: 'speckle',
+  dusty: true,
   music: 'garage',
 };
 
@@ -212,6 +213,7 @@ export const DOG_STREETS: BiomeDef = {
     door: 0x2a3344,
   },
   floorPattern: 'grid',
+  dusty: true,
   music: 'dog-patrol',
 };
 
@@ -257,6 +259,7 @@ export const DOG_RULED_STREET: BiomeDef = {
     door: 0x6b4a36,
   },
   floorPattern: 'grid',
+  dusty: true,
   music: 'dog-snowball',
 };
 
@@ -280,6 +283,7 @@ export const DOG_RULED_PARK: BiomeDef = {
     door: 0x6b4a36,
   },
   floorPattern: 'blobs',
+  dusty: true,
   music: 'dog-snowball',
 };
 

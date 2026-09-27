@@ -183,6 +183,18 @@ export const ENGINE_SPRITES: SpriteArt[] = [
   },
   { key: 'fx-dot', width: 8, height: 8, draw: (g) => dot(g, 4, 4, 4, 0xffffff) },
   {
+    // Ripples around the feet of someone wading through a slow floor (tinted with the floor's slow color).
+    key: 'fx-ripple',
+    width: 44,
+    height: 16,
+    draw: (g) => {
+      g.lineStyle(2.5, 0xffffff, 0.9);
+      g.strokeEllipse(22, 8, 30, 10);
+      g.lineStyle(2, 0xffffff, 0.55);
+      g.strokeEllipse(22, 8, 42, 14);
+    },
+  },
+  {
     // A spark flying off a hit: a sliver pointing along its path, dark-edged so it shows on any floor.
     key: 'fx-spark',
     width: 12,

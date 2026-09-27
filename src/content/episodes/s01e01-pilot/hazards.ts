@@ -70,7 +70,22 @@ const scannerArt: SpriteArt = {
 };
 
 /** Second states the hazards swap to (their base art is registered with the hazards themselves). */
-export const PILOT_HAZARD_ART: SpriteArt[] = [lockerArt('hazard-locker-open', true), ledgeArt('hazard-ledge-gone', true)];
+export const PILOT_HAZARD_ART: SpriteArt[] = [
+  lockerArt('hazard-locker-open', true),
+  ledgeArt('hazard-ledge-gone', true),
+  {
+    // Cafeteria slop stuck to Morty's shoes while he's Slimed.
+    key: 'status-goo',
+    width: 40,
+    height: 16,
+    draw: (g) => {
+      blob(g, 20, 9, 17, 5.5, { fill: 0x8fae4a, seed: 951, wobble: 0.18, lineWidth: 2 });
+      for (const [x, r] of [[9, 3], [17, 2.4], [27, 3.2], [33, 2.2]] as const) blob(g, x, 12 + r, r * 0.8, r, { fill: 0x8fae4a, seed: 952 + x, lineWidth: 1.5 });
+      dot(g, 14, 7, 2, 0xc9e38a);
+      dot(g, 25, 8, 1.6, 0xc9e38a);
+    },
+  },
+];
 
 /** Flings a fan of textbooks when Morty wanders close. */
 export const burstLocker: EnemyDef = {
@@ -203,6 +218,9 @@ export const slimed: StatusDef = {
   positive: false,
   duration: { kind: 'seconds', value: 0.4 },
   stats: { mult: { moveSpeed: H.slop.slow } },
+  // Goo on his shoes while it lasts, so the slowdown explains itself.
+  shows: { art: 'status-goo', at: 'feet' },
+  explain: `Slimed: ${Math.round((1 - H.slop.slow) * 100)}% slower until you're out of the slop`,
   icon: (g) => {
     blob(g, 16, 20, 11, 8, { fill: 0x8fae4a, seed: 941, lineWidth: 2 });
     dot(g, 12, 9, 3, 0x8fae4a);

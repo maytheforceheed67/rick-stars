@@ -1,8 +1,40 @@
 /** Status effects from the Pilot. */
 import { blob, dot, heart, INK, stroke, wonkyPoly, wonkyRect } from '../../../engine/art/draw';
-import type { StatusDef } from '../../../engine/types';
+import type { SpriteArt, StatusDef } from '../../../engine/types';
 import { PILOT } from '../../balance';
 import { displayGlyph } from './icons';
+
+const percent = (mult: number) => `${Math.round((1 - mult) * 100)}%`;
+const STAMPED = PILOT.stamped;
+
+/** What the Pilot's slowdowns look like on Morty. */
+export const PILOT_STATUS_ART: SpriteArt[] = [
+  {
+    // Plaster casts on both legs (Broken Legs).
+    key: 'status-casts',
+    width: 34,
+    height: 16,
+    draw: (g) => {
+      for (const x of [5, 19]) {
+        wonkyRect(g, x, 1, 10, 14, { fill: 0xf4efe6, seed: 961 + x, radius: 3, lineWidth: 2 });
+        stroke(g, [[x + 1, 5], [x + 9, 7]], 0xc9c2b4, 1.5);
+        stroke(g, [[x + 1, 10], [x + 9, 12]], 0xc9c2b4, 1.5);
+      }
+    },
+  },
+  {
+    // A big red customs stamp across his shirt (Stamped).
+    key: 'status-stamp',
+    width: 26,
+    height: 18,
+    draw: (g) => {
+      wonkyRect(g, 1, 1, 24, 16, { fill: 0xf4efe6, fillAlpha: 0.85, seed: 971, radius: 2, lineWidth: 2 });
+      g.lineStyle(2.5, 0xd92f3a, 1);
+      g.strokeCircle(13, 9, 5.5);
+      g.lineBetween(8.5, 13, 17.5, 5);
+    },
+  },
+];
 
 export const PILOT_STATUSES: StatusDef[] = [
   {
@@ -43,7 +75,10 @@ export const PILOT_STATUSES: StatusDef[] = [
     positive: false,
     duration: { kind: 'rooms', value: PILOT.brokenLegs.rooms },
     stats: { mult: { moveSpeed: PILOT.brokenLegs.speedMult } },
-    flags: { noDash: true },
+    // He limps, in casts.
+    flags: { noDash: true, limp: true },
+    shows: { art: 'status-casts', at: 'feet' },
+    explain: `Broken Legs: ${percent(PILOT.brokenLegs.speedMult)} slower and no dashing, for ${PILOT.brokenLegs.rooms} rooms or until the serum`,
     icon: (g) => {
       wonkyRect(g, 10, 3, 12, 26, { fill: 0xf4efe6, seed: 2, radius: 4, lineWidth: 2 });
       stroke(g, [[10, 12], [22, 16]], 0xe0484d, 2);
@@ -108,12 +143,14 @@ export const PILOT_STATUSES: StatusDef[] = [
   {
     id: 'stamped',
     name: 'Stamped',
-    description: 'Buried in paperwork. 30% slower for 2 seconds.',
+    description: `Buried in paperwork. ${percent(STAMPED.speedMult)} slower for ${STAMPED.seconds} seconds.`,
     firstAppears: 'S01E01',
     canon: false,
     positive: false,
-    duration: { kind: 'seconds', value: 2 },
-    stats: { mult: { moveSpeed: 0.7 } },
+    duration: { kind: 'seconds', value: STAMPED.seconds },
+    stats: { mult: { moveSpeed: STAMPED.speedMult } },
+    shows: { art: 'status-stamp', at: 'body' },
+    explain: `Stamped: buried in paperwork, ${percent(STAMPED.speedMult)} slower for ${STAMPED.seconds} s`,
     icon: (g) => {
       wonkyRect(g, 5, 5, 22, 22, { fill: 0xf4efe6, seed: 6, radius: 2, lineWidth: 2 });
       g.lineStyle(3, 0xd92f3a, 1);

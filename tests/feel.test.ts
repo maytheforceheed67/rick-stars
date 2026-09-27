@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { FEEL } from '../src/content/balance';
+import { BASE_STATS, FEEL, PLAYER } from '../src/content/balance';
 import { createRegistry } from '../src/content/registry';
 import { clearMuzzle, FireGate, holdFor, rigPose, type Side } from '../src/engine/runtime/aim';
+import { inputDirection, stepWalk, WalkCycle } from '../src/engine/runtime/motion';
 import { episodeActs } from '../src/engine/registry';
 import type { ItemDef } from '../src/engine/types';
 
@@ -165,5 +166,112 @@ describe('bullets you can read at a glance', () => {
     const { ENGINE_SPRITES } = await import('../src/engine/art/engineSprites');
     const bolt = ENGINE_SPRITES.find((a) => a.key === 'shot-bolt-edge')!;
     expect(bolt.width / bolt.height).toBeGreaterThanOrEqual(2.5);
+  });
+});
+
+describe('movement that feels alive', () => {
+  const dt = 1 / 60;
+  const top = BASE_STATS.moveSpeed;
+  const M = FEEL.move;
+  const speed = (v: { x: number; y: number }) => Math.hypot(v.x, v.y);
+  /** Frames until `done`, walking with `input` from `v`. */
+  const framesUntil = (v: { x: number; y: number }, input: { x: number; y: number }, done: (v: { x: number; y: number }) => boolean, t = top) => {
+    for (let f = 1; f < 600; f++) {
+      v = stepWalk(v, input, t, dt);
+      if (done(v)) return { f, v };
+    }
+    return { f: Infinity, v };
+  };
+
+  it('gets to full speed in about 0.08 s: a ramp, not an instant jump', () => {
+    const first = stepWalk({ x: 0, y: 0 }, { x: 1, y: 0 }, top, dt);
+    expect(first.x).toBeGreaterThan(0);
+    expect(first.x).toBeLessThan(top * 0.5);
+    const { f } = framesUntil({ x: 0, y: 0 }, { x: 1, y: 0 }, (v) => speed(v) >= top - 1e-6);
+    expect(f * dt).toBeGreaterThanOrEqual(M.startSeconds - dt);
+    expect(f * dt).toBeLessThanOrEqual(M.startSeconds + dt);
+  });
+
+  it('stops dead in about 0.06 s, with no drift', () => {
+    const { f } = framesUntil({ x: top, y: 0 }, { x: 0, y: 0 }, (v) => speed(v) === 0);
+    expect(f * dt).toBeLessThanOrEqual(M.stopSeconds + dt);
+    // Stopping distance: about half the speed times the stopping time.
+    let v = { x: top, y: 0 };
+    let dist = 0;
+    for (let i = 0; i < 60; i++) {
+      v = stepWalk(v, { x: 0, y: 0 }, top, dt);
+      dist += v.x * dt;
+    }
+    expect(dist).toBeLessThanOrEqual((top * M.stopSeconds) / 2 + top * dt);
+    expect(v).toEqual({ x: 0, y: 0 });
+  });
+
+  it('brakes harder turning around than stopping, so a 180 feels immediate', () => {
+    const reverse = framesUntil({ x: top, y: 0 }, { x: -1, y: 0 }, (v) => v.x <= 0);
+    const stop = framesUntil({ x: top, y: 0 }, { x: 0, y: 0 }, (v) => v.x <= 0);
+    expect(reverse.f).toBeLessThan(stop.f);
+    // And he's at full speed the other way soon after.
+    const back = framesUntil({ x: top, y: 0 }, { x: -1, y: 0 }, (v) => v.x <= -top + 1e-6);
+    expect(back.f * dt).toBeLessThanOrEqual(M.turnSeconds + M.startSeconds + 2 * dt);
+    // A 90 degree turn sheds the old sideways speed just as fast.
+    const side = framesUntil({ x: top, y: 0 }, { x: 0, y: 1 }, (v) => v.x === 0);
+    expect(side.f * dt).toBeLessThanOrEqual(M.turnSeconds + dt);
+  });
+
+  it('moves as fast on a diagonal as on a straight line (within 2%)', () => {
+    const d = inputDirection(1, 1);
+    expect(speed(d)).toBeCloseTo(1, 9);
+    const { v } = framesUntil({ x: 0, y: 0 }, d, () => false);
+    expect(Math.abs(speed(v) - top) / top).toBeLessThanOrEqual(0.02);
+    // Straight lines are left alone.
+    expect(inputDirection(1, 0)).toEqual({ x: 1, y: 0 });
+  });
+
+  it('keeps the same snappy ramp when sneaking or slowed, just a lower top speed', () => {
+    for (const k of [PLAYER.sneakSpeedMult, PLAYER.slowTileMult, 0.7]) {
+      const slow = top * k;
+      const { f, v } = framesUntil({ x: 0, y: 0 }, { x: 1, y: 0 }, (w) => speed(w) >= slow - 1e-6, slow);
+      expect(f * dt, `x${k}`).toBeLessThanOrEqual(M.startSeconds + dt);
+      expect(speed(v)).toBeCloseTo(slow, 6);
+    }
+    // Slowed down mid-stride, he eases down to the new top speed rather than snapping.
+    const eased = stepWalk({ x: top, y: 0 }, { x: 1, y: 0 }, top * 0.5, dt);
+    expect(eased.x).toBeLessThan(top);
+    expect(eased.x).toBeGreaterThan(top * 0.5);
+  });
+
+  it('walks in step: a foot up in each step, left and right in turn, and two bobs a stride', () => {
+    const w = new WalkCycle();
+    const feet: number[] = [];
+    let bobs = 0;
+    let last = 0;
+    let rising = false;
+    for (let i = 0; i < 200; i++) {
+      w.advance(M.stepLength / 100);
+      if (w.stride !== 0 && feet[feet.length - 1] !== w.stride) feet.push(w.stride);
+      const b = -w.bob();
+      if (b > last) rising = true;
+      else if (rising && b < last) {
+        bobs++;
+        rising = false;
+      }
+      last = b;
+    }
+    // Two steps is one stride: right foot, left foot, and a bob on each.
+    expect(feet).toEqual([1, -1]);
+    expect(bobs).toBe(2);
+    expect(Math.max(...Array.from({ length: 100 }, (_, i) => ((w.phase = i / 100), -w.bob())))).toBeCloseTo(M.bobPx, 1);
+  });
+
+  it('gives everyone who walks in a scene a walk cycle, and anyone you can play a free arm too', () => {
+    const people = [...reg.characters.values()].filter((c) => c.sprite);
+    expect(people.length).toBeGreaterThanOrEqual(15);
+    for (const c of people) {
+      expect(c.sprite!.poses, c.id).toBeTruthy();
+      // Holding a weapon needs the frames with the weapon's arm left out.
+      if (c.holds) expect(c.sprite!.poses, c.id).toBe(true);
+    }
+    // Art a scene swaps in (Snuffles getting his helmet) walks too.
+    for (const key of ['snuffles-helmet', 'snuffles-arm']) expect(reg.sprites.get(key)?.poses, key).toBeTruthy();
   });
 });
