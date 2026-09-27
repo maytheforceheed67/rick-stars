@@ -1,12 +1,14 @@
 /**
  * Game feel: particle bursts, floating text, speech bubbles, screen shake, flashes and hit-stop.
- * Shake and flashes follow the player's accessibility settings.
+ * Shake and flashes follow the player's accessibility settings, and no flash ever hides the
+ * bullets (see flashes.ts).
  */
 import Phaser from 'phaser';
 import { FEEL } from '../../content/balance';
 import type { Settings } from '../save/save';
 import type { Vec } from '../types';
 import { FONT } from '../ui/text';
+import { flashAlpha, flashLength, flashPeak, hurtEdgeProfile, hurtFade } from './flashes';
 
 export type BurstStyle = 'hit' | 'death' | 'ice' | 'scrap' | 'slime' | 'paper' | 'portal' | 'smoke' | 'spark' | 'heal' | 'fire' | 'confetti';
 
@@ -36,6 +38,19 @@ const STYLES: Record<BurstStyle, BurstConfig> = {
   confetti: { texture: 'fx-square', tint: [0x97ce4c, 0xf7d747, 0xf08fb0, 0x8ec5de, 0xff8a3d], speed: [120, 380], life: 1300, scale: [1, 0.6], count: 40, gravity: 260 },
 };
 
+/** A full-screen flash in progress. */
+interface Flash {
+  color: number;
+  peak: number;
+  ms: number;
+  /** Real milliseconds since it started (slow motion doesn't stretch a flash). */
+  t: number;
+}
+
+/** Past the screen's edge, so a shaking camera never shows a gap. */
+const OVERSCAN = 32;
+const HURT_EDGE = 'fx-hurt-edge';
+
 interface Bubble {
   box: Phaser.GameObjects.Container;
   follow?: () => Vec | null;
@@ -54,10 +69,19 @@ export class Fx {
   private impacts: Vec[] = [];
   private bubbles: Bubble[] = [];
   private hitStopTimer: Phaser.Time.TimerEvent | null = null;
+  private flashes: Flash[] = [];
+  /** One overlay shows the strongest flash going, so flashes on top of each other don't add up. */
+  private flashRect: Phaser.GameObjects.Rectangle | null = null;
+  /** Real milliseconds since Morty was last hurt. */
+  private hurtT = Infinity;
+  private hurtEdge: Phaser.GameObjects.Image | null = null;
+  private hurtBorder: Phaser.GameObjects.Graphics | null = null;
 
+  /** `busy` says whether there's something on screen to dodge (enemy shots, hazards). */
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly settings: () => Settings,
+    private readonly busy: () => boolean = () => false,
   ) {
     for (const [style, c] of Object.entries(STYLES) as [BurstStyle, BurstConfig][]) {
       const e = scene.add.particles(0, 0, c.texture, {
@@ -240,6 +264,15 @@ export class Fx {
 
   update(dt: number): void {
     this.impacts.length = 0;
+    // Flashes run on real time: slow motion never draws one out over the action.
+    const real = Math.min(100, this.scene.game.loop.delta);
+    for (const f of this.flashes) f.t += real;
+    this.flashes = this.flashes.filter((f) => f.t < f.ms);
+    this.drawFlash();
+    if (this.hurtT < Infinity) {
+      this.hurtT += real;
+      this.drawHurt();
+    }
     for (const b of this.bubbles) {
       b.life -= dt;
       const p = b.follow?.();
@@ -258,18 +291,98 @@ export class Fx {
     this.scene.cameras.main.shake(ms, intensity / 1000);
   }
 
+  /**
+   * A full-screen flash of color that fades out over `ms`. It's never solid: at most
+   * FEEL.flash.maxAlpha, and no more than FEEL.flash.busyAlpha while there's anything to dodge on
+   * screen; with Reduced flashes, a faint tint.
+   */
   flash(color: number, ms: number): void {
-    const cam = this.scene.cameras.main;
-    const r = (color >> 16) & 0xff;
-    const g = (color >> 8) & 0xff;
-    const b = color & 0xff;
-    if (this.settings().reducedFlash) {
-      // A gentle tint instead of a full-screen flash.
-      const overlay = this.scene.add.rectangle(cam.scrollX + cam.width / 2, cam.scrollY + cam.height / 2, cam.width * 2, cam.height * 2, color, 0.12).setDepth(7000);
-      this.scene.tweens.add({ targets: overlay, alpha: 0, duration: ms * 2, onComplete: () => overlay.destroy() });
+    const reduced = this.settings().reducedFlash;
+    this.flashes.push({ color, peak: flashPeak(reduced), ms: flashLength(ms, reduced), t: 0 });
+    this.drawFlash();
+  }
+
+  private drawFlash(): void {
+    let best: Flash | null = null;
+    let alpha = 0;
+    const busy = this.flashes.length > 0 && this.busy();
+    for (const f of this.flashes) {
+      const a = flashAlpha(f.peak, f.ms, f.t, busy);
+      if (a > alpha) {
+        alpha = a;
+        best = f;
+      }
+    }
+    if (!best) {
+      this.flashRect?.setVisible(false);
       return;
     }
-    cam.flash(ms, r, g, b, true);
+    const cam = this.scene.cameras.main;
+    // Sized past the view, so a shaking or tilting camera never shows its edge.
+    this.flashRect ??= this.scene.add
+      .rectangle(cam.width / 2, cam.height / 2, cam.width * 1.5, cam.height * 1.5, 0xffffff)
+      .setScrollFactor(0)
+      .setDepth(7000);
+    this.flashRect.setFillStyle(best.color, alpha).setVisible(true);
+  }
+
+  /**
+   * Morty got hurt: a red glow around the very edge of the screen, gone in FEEL.hurt.edgeMs, with
+   * the middle, where the bullets are, left clear. With Reduced flashes, a thin red border.
+   */
+  hurt(): void {
+    this.hurtT = 0;
+    this.drawHurt();
+  }
+
+  private drawHurt(): void {
+    const H = FEEL.hurt;
+    const reduced = this.settings().reducedFlash;
+    const k = hurtFade(this.hurtT, reduced);
+    const cam = this.scene.cameras.main;
+    if (k <= 0) this.hurtT = Infinity;
+    if (reduced) {
+      this.hurtEdge?.setVisible(false);
+      this.hurtBorder ??= this.scene.add.graphics().setScrollFactor(0).setDepth(7001);
+      const g = this.hurtBorder.clear();
+      if (k > 0) {
+        g.lineStyle(H.borderPx, H.color, k);
+        g.strokeRect(H.borderPx / 2, H.borderPx / 2, cam.width - H.borderPx, cam.height - H.borderPx);
+      }
+      return;
+    }
+    this.hurtBorder?.clear();
+    this.hurtEdge ??= this.scene.add.image(cam.width / 2, cam.height / 2, this.hurtEdgeTexture(cam.width, cam.height)).setScrollFactor(0).setDepth(7001);
+    this.hurtEdge.setVisible(k > 0).setAlpha(k);
+  }
+
+  /** The hurt glow, drawn once: red along each edge of the view, fading to nothing inside its band. */
+  private hurtEdgeTexture(w: number, h: number): string {
+    const textures = this.scene.textures;
+    if (textures.exists(HURT_EDGE)) return HURT_EDGE;
+    const H = FEEL.hurt;
+    const W = w + OVERSCAN * 2;
+    const Ht = h + OVERSCAN * 2;
+    const tex = textures.createCanvas(HURT_EDGE, W, Ht);
+    if (!tex) return HURT_EDGE;
+    const ctx = tex.getContext();
+    const band = H.edgeBand * h;
+    const rgb = `${(H.color >> 16) & 0xff},${(H.color >> 8) & 0xff},${H.color & 0xff}`;
+    // One gradient per edge, from the screen's edge inward; past the edge it keeps full strength.
+    const edges: [number, number, number, number, number, number, number, number][] = [
+      [0, 0, W, OVERSCAN + band, 0, OVERSCAN, 0, OVERSCAN + band],
+      [0, Ht - OVERSCAN - band, W, OVERSCAN + band, 0, Ht - OVERSCAN, 0, Ht - OVERSCAN - band],
+      [0, 0, OVERSCAN + band, Ht, OVERSCAN, 0, OVERSCAN + band, 0],
+      [W - OVERSCAN - band, 0, OVERSCAN + band, Ht, W - OVERSCAN, 0, W - OVERSCAN - band, 0],
+    ];
+    for (const [x, y, rw, rh, x0, y0, x1, y1] of edges) {
+      const grad = ctx.createLinearGradient(x0, y0, x1, y1);
+      for (let i = 0; i <= 10; i++) grad.addColorStop(i / 10, `rgba(${rgb},${hurtEdgeProfile((i / 10) * band, h).toFixed(3)})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, y, rw, rh);
+    }
+    tex.refresh();
+    return HURT_EDGE;
   }
 
   /** Freezes the action for a moment on big hits (the run scene skips its update meanwhile). */
@@ -295,6 +408,9 @@ export class Fx {
 
   destroy(): void {
     this.clearBubbles();
+    this.flashRect?.destroy();
+    this.hurtEdge?.destroy();
+    this.hurtBorder?.destroy();
     this.emitters.forEach((e) => e.destroy());
     this.emitters.clear();
     this.sparks.destroy();

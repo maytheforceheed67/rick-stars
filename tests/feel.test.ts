@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BASE_STATS, FEEL, PLAYER } from '../src/content/balance';
 import { createRegistry } from '../src/content/registry';
+import { GAME_HEIGHT, GAME_WIDTH, HUD_HEIGHT } from '../src/engine/constants';
 import { clearMuzzle, FireGate, holdFor, rigPose, type Side } from '../src/engine/runtime/aim';
+import { blinkTint, flashAlpha, flashLength, flashPeak, hurtEdgeProfile, hurtFade } from '../src/engine/runtime/flashes';
 import { inputDirection, stepWalk, WalkCycle } from '../src/engine/runtime/motion';
 import { episodeActs } from '../src/engine/registry';
 import type { ItemDef } from '../src/engine/types';
@@ -273,5 +275,101 @@ describe('movement that feels alive', () => {
     }
     // Art a scene swaps in (Snuffles getting his helmet) walks too.
     for (const key of ['snuffles-helmet', 'snuffles-arm']) expect(reg.sprites.get(key)?.poses, key).toBeTruthy();
+  });
+});
+
+describe('getting hurt never hides the danger', () => {
+  const H = FEEL.hurt;
+  const F = FEEL.flash;
+  /** The play area: the screen below the HUD strip. */
+  const W = GAME_WIDTH;
+  const V = GAME_HEIGHT - HUD_HEIGHT;
+  const code = import.meta.glob('../src/**/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+
+  it('shows a hit as a red glow at the edge for 80-120 ms, never a wash over the middle', () => {
+    expect(H.edgeMs).toBeGreaterThanOrEqual(80);
+    expect(H.edgeMs).toBeLessThanOrEqual(120);
+    expect(hurtFade(0, false)).toBe(1);
+    expect(hurtFade(H.edgeMs - 1, false)).toBeGreaterThan(0);
+    expect(hurtFade(H.edgeMs, false)).toBe(0);
+    // Strongest right at the edge, nothing past its band, and the band is a thin strip.
+    const band = H.edgeBand * V;
+    expect(hurtEdgeProfile(0, V)).toBeCloseTo(H.edgeAlpha, 9);
+    expect(hurtEdgeProfile(band, V)).toBe(0);
+    expect(band / V).toBeLessThanOrEqual(0.15);
+    // The play area in the middle stays fully clear, at every moment of the glow.
+    for (let x = 0; x <= W; x += 8) {
+      for (let y = 0; y <= V; y += 8) {
+        if (x < W * 0.15 || x > W * 0.85 || y < V * 0.15 || y > V * 0.85) continue;
+        expect(hurtEdgeProfile(Math.min(x, y, W - x, V - y), V), `${x},${y}`).toBe(0);
+      }
+    }
+    // Getting hurt doesn't also flash the whole screen.
+    const run = code['../src/scenes/RunScene.ts'];
+    const hurt = run.slice(run.indexOf('  damagePlayer('), run.indexOf('  healPlayer('));
+    expect(hurt).toContain('this.fx.hurt()');
+    expect(hurt).not.toContain('.flash(');
+  });
+
+  it('makes it a thin red border with Reduced flashes', () => {
+    expect(H.borderPx).toBeGreaterThan(0);
+    expect(H.borderPx).toBeLessThanOrEqual(8);
+    expect(hurtFade(H.borderMs / 2, true)).toBeGreaterThan(0);
+    expect(hurtFade(H.borderMs, true)).toBe(0);
+  });
+
+  it('keeps every full-screen flash faint while there are bullets on screen', () => {
+    // Every flash the game asks for, read straight out of the code.
+    const asked: number[] = [];
+    for (const [file, text] of Object.entries(code)) {
+      if (file.endsWith('Fx.ts')) continue;
+      for (const m of text.matchAll(/\bflash\([^;]*?,\s*(\d+)\)/g)) asked.push(Number(m[1]));
+    }
+    expect(asked.length).toBeGreaterThanOrEqual(12);
+    expect(F.busyAlpha).toBeLessThanOrEqual(0.25);
+    for (const ms of asked) {
+      for (const reduced of [false, true]) {
+        const peak = flashPeak(reduced);
+        const len = flashLength(ms, reduced);
+        for (let t = 0; t <= len; t += 5) {
+          // With shots on screen: at most ~25%, however long the flash is.
+          expect(flashAlpha(peak, len, t, true), `${ms} ms at ${t}`).toBeLessThanOrEqual(0.25);
+          // Never solid, even with nothing to dodge.
+          expect(flashAlpha(peak, len, t, false)).toBeLessThan(1);
+        }
+        expect(flashAlpha(peak, len, len, false)).toBe(0);
+      }
+    }
+    expect(flashPeak(true)).toBeLessThanOrEqual(F.busyAlpha);
+    // Nothing goes around the rule with the camera's own solid flash.
+    for (const [file, text] of Object.entries(code)) expect(text, file).not.toMatch(/(cam|cameras\.main)\.flash\(/);
+  });
+
+  it('blinks Morty after a hit with a tint, never fading him out', () => {
+    let flips = 0;
+    let last = blinkTint(0, false);
+    const seen = new Set<number>([last]);
+    for (let f = 1; f <= 60; f++) {
+      const c = blinkTint(f / 60, false);
+      if (c !== last) flips++;
+      last = c;
+      seen.add(c);
+    }
+    // His own colors and the bright red tint in turn, several times a second.
+    expect([...seen].sort()).toEqual([H.blinkTint, 0xffffff].sort());
+    expect(flips).toBeGreaterThanOrEqual(H.blinkHz);
+    // The tint keeps him bright: every channel at least 40% (a tint only multiplies, never hides).
+    for (const c of seen) for (const shift of [16, 8, 0]) expect((c >> shift) & 0xff).toBeGreaterThanOrEqual(0x66);
+    // With Reduced flashes: a slow pulse (under 3 a second), no hard flicker: small steps from
+    // one frame to the next, where the flicker jumps all the way at once.
+    expect(H.pulseHz).toBeLessThan(3);
+    for (let f = 1; f <= 120; f++) {
+      const a = blinkTint((f - 1) / 60, true);
+      const b = blinkTint(f / 60, true);
+      for (const shift of [16, 8, 0]) expect(Math.abs(((a >> shift) & 0xff) - ((b >> shift) & 0xff))).toBeLessThanOrEqual(20);
+    }
+    // The blink never touches his alpha.
+    const player = code['../src/engine/runtime/Player.ts'];
+    expect(player).not.toMatch(/alpha \*= [^;]*sin/);
   });
 });

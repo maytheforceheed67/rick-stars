@@ -468,6 +468,10 @@ export interface GameCtx {
   say(speaker: ContentId, text: string, seconds?: number): void;
   sfx(id: string): void;
   shake(intensity: number, ms: number): void;
+  /**
+   * A full-screen flash of color, fading out over `ms`. It never hides the bullets: it's never
+   * solid, and stays faint (FEEL.flash.busyAlpha) while anything to dodge is on screen.
+   */
   flash(color: number, ms: number): void;
   /** Shows a temporary pulsing sprite (e.g. a lit bomb) for a few seconds. */
   marker(art: string, x: number, y: number, seconds: number): void;

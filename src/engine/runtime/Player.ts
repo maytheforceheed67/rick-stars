@@ -14,6 +14,7 @@ import type { Rng } from '../rng';
 import type { Settings } from '../save/save';
 import type { PlayerRef, StatusFlags, TileKind, Vec } from '../types';
 import { FireGate, type RigPose } from './aim';
+import { blinkTint } from './flashes';
 import { HeldWeapon } from './HeldWeapon';
 import { inputDirection, stepWalk, WalkCycle } from './motion';
 
@@ -121,6 +122,9 @@ export class Player implements PlayerRef {
   /** How far a scene walked him since his view was last drawn (see walkTo). */
   private sceneDx = 0;
   private sceneDy = 0;
+  /** The blink after a hit: seconds left, and how far into it he is. */
+  private blinkLeft = 0;
+  private blinkT = 0;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -218,6 +222,12 @@ export class Player implements PlayerRef {
     this.syncView();
   }
 
+  /** He just got hurt: he blinks for as long as he can't be hurt again. */
+  blink(seconds = PLAYER.hurtIframes): void {
+    this.blinkLeft = seconds;
+    this.blinkT = 0;
+  }
+
   /** A scene walks him a step, to here: he isn't steering, but he walks the walk. */
   walkTo(x: number, y: number): void {
     this.sceneDx += x - this.sprite.x;
@@ -280,6 +290,8 @@ export class Player implements PlayerRef {
     this.t += dt;
     this.sinceShot += dt;
     this.iframes = Math.max(0, this.iframes - dt);
+    this.blinkLeft = Math.max(0, this.blinkLeft - dt);
+    this.blinkT += dt;
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
     this.dashAge += dt;
     const decay = Math.exp(-dt * 10);
@@ -486,8 +498,13 @@ export class Player implements PlayerRef {
     let lean = 0;
     if (this.dashLeft > 0) lean = this.dashVx >= 0 ? 14 : -14;
     else lean = M.leanDeg * Math.max(-1, Math.min(1, vx / Math.max(1, this.topSpeed)));
-    if (this.iframes > 0 && this.dashLeft <= 0) alpha *= reduced ? 0.55 + 0.25 * Math.sin(this.t * 10) : Math.sin(this.t * 45) > 0 ? 1 : 0.3;
-    else if (this.sneaking) alpha *= 0.75;
+    if (this.sneaking) alpha *= 0.75;
+    // After a hit he blinks: a bright red tint in turn with his own colors. Never see-through, so
+    // you always know where you are.
+    const blinking = this.blinkLeft > 0 && this.dashLeft <= 0 && this.falling <= 0;
+    const tint = blinking ? blinkTint(this.blinkT, reduced) : 0xffffff;
+    if (tint === 0xffffff) v.clearTint();
+    else v.setTint(tint);
     v.setAngle(s.angle + lean).setAlpha(alpha);
     s.setDepth(s.y);
     this.shadow.setPosition(s.x, s.y + 4);

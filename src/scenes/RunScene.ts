@@ -327,7 +327,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     this.enemyShots = new ProjectilePool(this, 4200, 420);
     this.telegraphs = new TelegraphLayer(this);
     this.hazards = new HazardLayer(this, (id) => this.sfx(id));
-    this.fx = new Fx(this, () => this.settings());
+    this.fx = new Fx(this, () => this.settings(), () => this.dangerOnScreen());
     this.objects = new WorldObjects(this);
     this.player = new Player(this, this, this.playerTexture(), 0, 0);
     // After the player's own view is placed each frame: what rides on him (his hat), and the walk
@@ -2300,7 +2300,9 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     p.iframes = PLAYER.hurtIframes;
     this.sfx('hurt');
     this.fx.shake(9, 180);
-    this.fx.flash(0xff3040, 90);
+    // A red glow at the edge of the screen and a blink on Morty: never a wash over the bullets.
+    this.fx.hurt();
+    p.blink();
     this.fx.hitStop(55);
     this.fx.burst('hit', p.x, p.y - 10, 8);
     runHook(this.sources(), 'onDamageTaken', this.ctx, halves, source);
@@ -2311,6 +2313,17 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.onDeath();
     }
     return true;
+  }
+
+  /** Whether there's anything to dodge on screen: enemy shots in view, or live hazards. */
+  private dangerOnScreen(): boolean {
+    if (this.hazards?.count()) return true;
+    const view = this.cameras.main.worldView;
+    let seen = false;
+    this.enemyShots?.forEachActive((p) => {
+      if (!seen && p.x > view.x - 40 && p.x < view.right + 40 && p.y > view.y - 40 && p.y < view.bottom + 40) seen = true;
+    });
+    return seen;
   }
 
   healPlayer(halves: number): void {

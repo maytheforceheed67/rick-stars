@@ -240,6 +240,33 @@ export const FEEL = {
     /** At most this many hit sounds in one frame, so a volley doesn't clip. */
     maxSoundsPerFrame: 2,
   },
+  /** Getting hurt shows, without ever hiding the bullets you need to dodge. */
+  hurt: {
+    color: 0xff3040,
+    /** A red glow on the edge of the screen only, for this long (ms, 80-120). */
+    edgeMs: 100,
+    /** How far in it reaches, as a share of the screen's height (the middle stays clear). */
+    edgeBand: 0.12,
+    /** Its strength right at the edge. */
+    edgeAlpha: 0.65,
+    /** With Reduced flashes: a thin red border (px) instead, fading over this long (ms). */
+    borderPx: 5,
+    borderMs: 180,
+    /** After a hit he flickers to a bright red tint this many times a second: never see-through. */
+    blinkHz: 11,
+    blinkTint: 0xff6a6a,
+    /** With Reduced flashes the flicker is a slow pulse instead (per second). */
+    pulseHz: 2.5,
+  },
+  /** Full-screen flashes (explosions, the Rick call, boss kills, cover blown...). */
+  flash: {
+    /** The strongest a flash gets with nothing to dodge on screen. */
+    maxAlpha: 0.7,
+    /** With enemy shots or hazards on screen, no flash ever goes over this, however long it is. */
+    busyAlpha: 0.25,
+    /** With Reduced flashes: a faint tint instead, fading out over twice as long. */
+    reducedAlpha: 0.12,
+  },
 };
 
 export const ENEMIES = {
