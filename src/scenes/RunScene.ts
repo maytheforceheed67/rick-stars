@@ -7,7 +7,7 @@ import Phaser from 'phaser';
 import { BASE_STATS, ECONOMY, ENEMIES, PLAYER, RICK_METER, ROOMS, SHOTS, STAT_LIMITS } from '../content/balance';
 import { bakeArt, TEXTURE_PAD } from '../engine/art/textures';
 import { GAME_HEIGHT, GAME_WIDTH, HUD_HEIGHT, TILE } from '../engine/constants';
-import { buildFixedFloor, generateFloor, type FloorConfig, type FloorRoom } from '../engine/dungeon/generate';
+import { buildFixedFloor, generateFloor, regionOf, type FloorConfig, type FloorRoom } from '../engine/dungeon/generate';
 import { DIR_VEC, doorCell, OPPOSITE, type Dir, type ParsedTemplate } from '../engine/dungeon/templates';
 import { activeSynergies, activeTransformations, hookSources, itemModifiers, runHook, type HookSource } from '../engine/effects/hooks';
 import { computeStats, type StatBlock, type StatModifiers } from '../engine/effects/stats';
@@ -1190,9 +1190,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private regionOf(fr: FloorRoom | null): number {
     const layout = this.run.act.layout;
     const n = layout.kind === 'procedural' ? (layout.regions?.length ?? 0) + 1 : 1;
-    if (n === 1 || !fr || !this.run.floor) return 0;
-    const deepest = Math.max(...this.run.floor.rooms.map((r) => r.depth));
-    return Math.min(n - 1, Math.floor((fr.depth * n) / (deepest + 1)));
+    return fr && this.run.floor ? regionOf(this.run.floor, fr, n) : 0;
   }
 
   private regionBiome(region: number): BiomeDef {

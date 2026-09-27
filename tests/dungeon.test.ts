@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRegistry } from '../src/content/registry';
-import { buildFixedFloor, generateFloor, type Floor, type FloorConfig } from '../src/engine/dungeon/generate';
+import { buildFixedFloor, generateFloor, regionOf, type Floor, type FloorConfig, type FloorRoom } from '../src/engine/dungeon/generate';
 import { episodeActs } from '../src/engine/registry';
 import { Rng } from '../src/engine/rng';
 import type { ActDef, FixedLayout } from '../src/engine/types';
@@ -99,6 +99,42 @@ describe('floor generation', () => {
       }
     });
   }
+
+  const withRegions = procedural.filter((a) => a.layout.kind === 'procedural' && a.layout.regions?.length);
+
+  it('has an act that walks from one place into the next (the dreams)', () => {
+    expect(withRegions.length).toBeGreaterThanOrEqual(1);
+  });
+
+  for (const act of withRegions) {
+    it(`${act.id}: 1,000 seeds all cross every region, from the start to the finale`, () => {
+      const cfg = floorConfig(act);
+      const n = (act.layout.kind === 'procedural' ? act.layout.regions!.length : 0) + 1;
+      for (let i = 0; i < 1000; i++) {
+        const floor = generateFloor(cfg, new Rng(`seed-${i}`).fork(`floor:${act.id}`));
+        const where = `${act.id} seed-${i}`;
+        const region = (r: FloorRoom) => regionOf(floor, r, n);
+        expect(region(floor.rooms[floor.startId]), where).toBe(0);
+        expect(region(floor.rooms[floor.finaleId!]), where).toBe(n - 1);
+        for (let k = 0; k < n; k++) expect(floor.rooms.some((r) => region(r) === k), `${where} region ${k}`).toBe(true);
+        // Deeper is never an earlier region, so walking on never steps back into the last place.
+        for (const r of floor.rooms) {
+          for (const nb of Object.values(r.neighbors)) {
+            const next = floor.rooms[nb!];
+            if (next.depth > r.depth) expect(region(next), where).toBeGreaterThanOrEqual(region(r));
+          }
+        }
+        // A fight past the first region (Scary Terry shows up after the first clear there).
+        expect(floor.rooms.some((r) => region(r) >= 1 && r.kind === 'combat'), where).toBe(true);
+      }
+    });
+  }
+
+  it('keeps floors without regions in one place', () => {
+    const cfg = floorConfig(procedural[0]);
+    const floor = generateFloor(cfg, new Rng('one-place'));
+    expect(floor.rooms.every((r) => regionOf(floor, r, 1) === 0)).toBe(true);
+  });
 
   it('the same seed produces the same floor', () => {
     for (const act of procedural) {

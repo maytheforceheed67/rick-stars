@@ -237,3 +237,14 @@ export function buildFixedFloor(layout: FixedLayout): Floor {
     gridH: Math.max(...ys) + 1,
   };
 }
+
+/**
+ * Which region of a floor a room belongs to (ProceduralLayout.regions): the floor is cut into
+ * `regionCount` bands by distance from the start, so walking deeper crosses from one place into
+ * the next (the club into the centaur's dream into the little girl's). Region 0 holds the start.
+ */
+export function regionOf(floor: Floor, room: FloorRoom, regionCount: number): number {
+  if (regionCount <= 1) return 0;
+  const deepest = Math.max(...floor.rooms.map((r) => r.depth));
+  return Math.min(regionCount - 1, Math.floor((room.depth * regionCount) / (deepest + 1)));
+}
