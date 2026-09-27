@@ -38,6 +38,29 @@ export const GOLDENFOLD_NIGHT: BiomeDef = {
   music: 'dog-night',
 };
 
+/** Rick's garage: concrete, crates and the ship. */
+export const SMITH_GARAGE: BiomeDef = {
+  id: 'smith-garage',
+  style: { walls: 'bricks', blocks: 'crate', doors: 'plain' },
+  name: "Rick's Garage",
+  palette: {
+    background: 0x16141f,
+    floor: 0x8a8a96,
+    floorAlt: 0x7c7c88,
+    wall: 0x5a5a6a,
+    wallTop: 0x74748a,
+    block: 0x8b6a45,
+    blockTop: 0xa8845a,
+    cliff: 0x333344,
+    cliffShadow: 0x222233,
+    slow: 0x5a7fbf,
+    accent: 0x97ce4c,
+    door: 0x5a5a6a,
+  },
+  floorPattern: 'speckle',
+  music: 'garage',
+};
+
 export const PLANE_BIOME: BiomeDef = {
   id: 'goldenfold-dream-plane',
   style: { walls: 'cabin', blocks: 'seat', doors: 'plain' },
@@ -228,7 +251,7 @@ export const PROLOGUE: ActDef = {
     // The house and the garage; then, across town (a ship ride, not a door), Goldenfold's house.
     rooms: [
       { x: 0, y: 0, kind: 'start', template: 'dog-living-room', script: 'dog-living-room' },
-      { x: 1, y: 0, kind: 'calm', template: 'dog-garage', script: 'dog-garage' },
+      { x: 1, y: 0, kind: 'calm', template: 'dog-garage', script: 'dog-garage', biome: SMITH_GARAGE },
       { x: 0, y: 2, kind: 'calm', template: 'dog-goldenfold-hall', script: 'dog-goldenfold-hall', biome: GOLDENFOLD_NIGHT },
       { x: 1, y: 2, kind: 'finale', template: 'dog-goldenfold-bedroom', biome: GOLDENFOLD_NIGHT },
     ],

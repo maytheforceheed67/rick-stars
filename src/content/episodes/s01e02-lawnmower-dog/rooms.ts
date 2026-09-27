@@ -380,7 +380,7 @@ export const DREAM_SPECIAL: RoomTemplate[] = [
   // Outside Mrs. Pancakes' dream club: the velvet rope and the centaur on the door.
   t('dream-start', [
     '...............',
-    '.......Y.......',
+    '...Y...........',
     '...............',
     '..=.........=..',
     '.......P.......',
@@ -465,7 +465,7 @@ export const DOG_STORY_ROOMS: RoomTemplate[] = [
     '....J.....R....',
     '.P......N......',
     '...............',
-    '..=====...=....',
+    '....c..........',
     '...............',
     '...............',
   ]),

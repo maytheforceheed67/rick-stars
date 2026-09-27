@@ -40,6 +40,9 @@ interface Bubble {
   follow?: () => Vec | null;
   offsetY: number;
   life: number;
+  /** Bubble size, to keep it inside the camera view. */
+  w: number;
+  h: number;
 }
 
 export class Fx {
@@ -157,14 +160,25 @@ export class Fx {
     this.scene.tweens.add({ targets: box, scale: 1, duration: 140, ease: 'Back.easeOut' });
     // Only one bubble per follow target at a time.
     if (follow) this.bubbles = this.bubbles.filter((b) => (b.follow === follow ? (b.box.destroy(), false) : true));
-    this.bubbles.push({ box, follow, offsetY: 0, life: seconds });
+    const bubble: Bubble = { box, follow, offsetY: 0, life: seconds, w, h: h + (name ? 22 : 12) };
+    this.bubbles.push(bubble);
+    this.placeBubble(bubble, at);
+  }
+
+  /** Puts a bubble over its speaker, nudged inside the camera view when they're near an edge. */
+  private placeBubble(b: Bubble, at: Vec): void {
+    const view = this.scene.cameras.main.worldView;
+    const margin = 6;
+    const x = Phaser.Math.Clamp(at.x, view.x + b.w / 2 + margin, Math.max(view.x + b.w / 2 + margin, view.right - b.w / 2 - margin));
+    const y = Math.max(at.y, view.y + b.h + margin);
+    b.box.setPosition(x, y);
   }
 
   update(dt: number): void {
     for (const b of this.bubbles) {
       b.life -= dt;
       const p = b.follow?.();
-      if (p) b.box.setPosition(p.x, p.y);
+      if (p) this.placeBubble(b, p);
       if (b.life < 0.25) b.box.setAlpha(Math.max(0, b.life / 0.25));
     }
     this.bubbles = this.bubbles.filter((b) => {

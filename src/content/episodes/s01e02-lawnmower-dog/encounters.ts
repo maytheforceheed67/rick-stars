@@ -315,6 +315,7 @@ export const DOG_SCRIPTS: RoomScriptDef[] = [
     id: 'dog-living-room',
     script: (api) => ({
       onEnter(first) {
+        for (const p of api.room.markers('c')) api.addProp({ art: 'smith-couch', x: p.x + 28, y: p.y + 20, solid: true, radius: 30 });
         if (first) {
           api.after(0.5, () => api.hint('Head east (right) to the garage.'));
           return;

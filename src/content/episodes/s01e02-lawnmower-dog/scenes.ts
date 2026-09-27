@@ -96,11 +96,19 @@ export function goldenfoldTurnsIt(api: RoomScriptApi, boss: EnemySelf): SceneSte
 
 /** Outside Mrs. Pancakes' dream club: the velvet rope, and a centaur who does not like them. */
 export function clubOpening(api: RoomScriptApi): SceneStep[] {
-  const door = spot(api, 'Y', { x: api.room.widthPx / 2, y: 110 });
+  const door = spot(api, 'Y', { x: api.room.widthPx / 3, y: 140 });
   return [
+    {
+      kind: 'do',
+      fn: () => {
+        // The club itself stays off-screen: just its door, the rope, and the bouncer.
+        api.addProp({ art: 'club-door', x: door.x, y: door.y - 30, depth: -200, persist: true });
+        api.addProp({ art: 'velvet-rope', x: door.x, y: door.y + 44, persist: true });
+      },
+    },
     { kind: 'wait', seconds: 0.6 },
     { kind: 'enter', who: 'rick', via: 'here', to: { near: 'morty', side: 1, gap: 84 } },
-    { kind: 'enter', who: 'centaur', via: 'here', to: { x: door.x, y: door.y + 70 } },
+    { kind: 'enter', who: 'centaur', via: 'here', to: { x: door.x + 90, y: door.y + 70 } },
     { kind: 'say', who: 'centaur', text: LINES.centaur.stop },
     { kind: 'say', who: 'rick', text: "We're with Goldenfold. Friends of the dreamer. VIPs, basically." },
     { kind: 'say', who: 'centaur', text: LINES.centaur.notOnList },
