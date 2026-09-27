@@ -167,9 +167,15 @@ Morty never pulls a weapon out of nowhere. **Every weapon he uses needs a story 
   | Snowball's world | Tennis ball launcher | Rick smuggles it in: dogs can't resist tennis balls |
 
 - **Weapons are items** of `kind: 'weapon'`, `rarity: 'story'`, `noPool: true`, with a `WeaponSpec`. Beyond damage, fire rate, extra projectiles and spread, it can set:
-  - `style: 'thrown'` (no muzzle flash, drawn untinted) or the default `'energy'`;
+  - `style: 'thrown'` or the default `'energy'`. Energy shots are white-hot bolts edged in the weapon's `color`. A throw swings Morty's arm through with a whoosh instead of a muzzle flash, and the thing he throws keeps its own sprite, with a bright rim and a trail;
   - `shot` (a sprite key, or a list to cycle through: the Pilot's junk pile) and `spin`;
   - `sizeMult`, `speedMult`, `rangeMult`, `knockbackMult`, `bounces` and `sfx`.
+- **Morty holds his weapon where you can see it**, so give a gun a `held` sprite: drawn pointing right, gripped 6 px in from its left edge and halfway up. The validator checks the sprite exists, and the tests fail a story gun without one (it would fall back to a generic ray gun). A thrown weapon holds the next thing it throws, unless it has a `held` sprite of its own (the dodgeball). Three optional anchors place it, with defaults in `FEEL.weapon`:
+  - `grip`: where his hand is, from his shoulder, along the aim (`x`) and across it (`y`);
+  - `muzzle`: where shots leave, from the hand, along the barrel and across it. Put it at the end of the barrel in your `held` drawing;
+  - `flash`: the muzzle flash's size (1 is Rick's spare ray gun; his own gun is 1.5).
+
+  Shots start at the muzzle and fly at chest height. A muzzle inside a wall pops the shot against the wall, and `tests/feel.test.ts` checks the muzzle for every story weapon at every angle.
 - **Each act's weapon replaces the last one.** Items that change shots (bounces, freezing, extra projectiles, hooks) apply to whatever Morty holds, so they carry over between acts.
 - **Balance against the weapon.** The hits-to-kill test uses each act's own weapon, so a hard-hitting weapon needs tougher enemies.
 
@@ -192,6 +198,9 @@ Morty never pulls a weapon out of nowhere. **Every weapon he uses needs a story 
   | `doors` (between rooms) | `plain`, `classroom`, `arch`, `gate`, `house` |
 
   A room in a fixed layout can look like somewhere else with `biome` on its `FixedRoomDef`. Examples are the inside of Rick's ship in the Pilot's prologue, the Smith garage, and the dog-ruled streets outside Snowball's palace.
+
+  Set `dusty: true` on a biome whose floor has dust to kick up (grass, dirt, streets): Morty's feet puff it up every few steps, in the floor's own color.
+- **Flashes never hide the bullets.** `ctx.flash(color, ms)` is a full-screen flash, but the engine keeps it from covering the fight. It's never solid, it stays at 25% opacity or less whenever there are enemy shots or hazards on screen, and it becomes a faint tint with Reduced flashing. Getting hurt only lights up the screen's edge. Use `flash` for big moments (an explosion, the dream shifting, cover blown), and don't draw your own full-screen overlays. The numbers are `FEEL.hurt` and `FEEL.flash` in `balance.ts`, and `tests/feel.test.ts` checks every `flash(...)` call in the code against them.
 - **Every run opens with a title card** built from the episode's season, number and title. You don't need to add anything.
 - **The Garage is a room Morty walks around.** The workbench sells upgrades, the closet has shirts, the TV has stats and settings, and Rick's ship opens the Season Map as the ship's navigation screen. Episodes don't need to touch it.
 
@@ -291,7 +300,9 @@ export const germTourist: EnemyDef = {
   Bring him in from a mechanic, and give the player a way to shake him. In Lawnmower Dog, diving into a sleeper's dream (E) makes him lose the scent for a while (`mechanics/scaryTerry.ts`).
 - **Enemy shots** use `kind` to pick the texture `shot-<kind>`:
   - built-in kinds: `orb`, `paper`, `ball`, `book`, `spore`, `bolt`, `stamp`, `ice`;
-  - to add a new look, register a sprite keyed `shot-<kind>` in `content.sprites`.
+  - to add a new look, register a sprite keyed `shot-<kind>` in `content.sprites`;
+  - **they must never look like Morty's shots.** Draw them round or chunky, in warm, hostile colors (red, orange, magenta) with a dark outline, never as streaks. `tests/feel.test.ts` reads every kind the brains fire and fails any sprite more than 1.5 times longer than it is wide.
+- **Enemies with guns fire from them.** Set `muzzle: { x, y }` on the `EnemyDef`: the end of the barrel in the sprite, from its center, drawn facing right. Shots then start there (flipped when the enemy faces left), with a small flash, and fly at gun height.
 
 ## Items, synergies, transformations and statuses
 
@@ -349,9 +360,13 @@ export const germTourist: EnemyDef = {
 - **Transformations** go in `content.transformations`: `{ set, count?, look, effect, stats?, hooks? }`. Holding any `count` (default 3) items from the set transforms Morty: a new look, a strong bonus and a "TRANSFORMATION!" moment. The Pilot has two, Garage Tinkerer and Seed Smuggler.
 - **Rewards:** bosses always drop a rare item (a test checks), treasure rooms offer a choice of two, and shops lead with one good item.
 - **Statuses** have a duration: `seconds`, `rooms`, `act` or `manual`. They can also take:
-  - `stats` and `flags` (`noDash`, `wobblyMove`, `wobblyAim`, `scrambled`);
+  - `stats` and `flags` (`noDash`, `wobblyMove`, `wobblyAim`, `scrambled`, and `limp`, which makes every other step drop);
   - `thenApply`, to chain into another status;
-  - `endsWithAct`.
+  - `endsWithAct`;
+  - `shows: { art, at: 'feet' | 'body' | 'head' }`, a sprite drawn on Morty while it lasts (the Pilot's goo on his shoes, casts, a customs stamp);
+  - `explain`, a short line toasted the first time it lands in a run, saying why (`'Slimed: 40% slower until you're out of the slop'`). Build the number into it from the balance value, so the two never disagree.
+
+  **A status that slows Morty down must show on him and explain itself**, or players think the game is lagging. Slow floors (`~`) already do both.
 
 ## Mechanics (plugins)
 
@@ -443,6 +458,8 @@ A script returns hooks: `onEnter(firstTime)`, `update(dt)`, `onExit()`, `onEnemi
   - It also checks that every character has appeared by the cutscene's own `firstAppears`.
   - Cutscenes can be skipped with Esc.
 - **Characters** need a code-drawn `portrait(g, size, expression)`, a speech `color` and an optional world `sprite`. `src/content/shared/art.ts` has `drawPerson` and `drawPortrait` helpers.
+  - **A world sprite walks.** Give it `poses: 'walk'` and pass the `pose` its `draw` gets on to `drawPerson(g, w, h, style, pose)`, which lifts one foot and swings the arms. The engine uses those frames, with a bob and a lean, whenever the character walks in a scene. Anything not built on `drawPerson` handles `pose.stride` itself: the dogs and the centaur trot on diagonal pairs of legs. `armSwing(pose, side)` says how far a hand moved, for things held in it (Frank's switchblade). `tests/feel.test.ts` fails a character sprite with no walk frames.
+  - **A playable character** (Jerry in the cutaways) needs `poses: true` instead, which adds the frames with one arm left out for the weapon's arm, and `holds: { shoulder, sleeve, skin }`: where the aiming shoulder is from the body's center, and the colors of the sleeve and hand drawn holding the weapon.
 - **Dialogue** is original, in character.
   - Rick is brilliant, drunk and dismissive, and burps mid-sentence, written `—*urrp*—`.
   - Morty is anxious ("aw geez").
@@ -450,7 +467,7 @@ A script returns hooks: `onEnter(firstTime)`, `update(dt)`, `onExit()`, `onEnemi
 
 ## Art, music and sound
 
-- **Sprites** are `SpriteArt { key, width, height, draw(g, w, h) }`, drawn with Phaser Graphics and baked to textures at boot. The house style: thick dark outlines, slightly wobbly shapes, flat bright colors, and portal green (`0x97ce4c`) as the accent. `src/engine/art/draw.ts` has the helpers: `blob`, `wonkyRect`, `wonkyPoly`, `eye`, `mouth` and more.
+- **Sprites** are `SpriteArt { key, width, height, draw(g, w, h, pose?), poses? }`, drawn with Phaser Graphics and baked to textures at boot (with `poses`, once for every walk frame too). The house style: thick dark outlines, slightly wobbly shapes, flat bright colors, and portal green (`0x97ce4c`) as the accent. `src/engine/art/draw.ts` has the helpers: `blob`, `wonkyRect`, `wonkyPoly`, `eye`, `mouth` and more.
 - **Music** goes in `content.music` as `{ [trackId]: Track }`: step patterns for bass, lead, drums and pad (the format is in `src/engine/audio/music.ts`). Biomes, acts, bosses and encounters refer to tracks by id, and the validator checks that they exist.
   - Built-in tracks: `title`, `garage`, `boss`, `calm`.
 - **Sound effects** go in `content.sfx` as WebAudio recipes (the format is in `src/engine/audio/sfx.ts`). Play them with `ctx.sfx(id)` / `api.sfx(id)`.

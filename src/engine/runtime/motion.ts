@@ -20,8 +20,8 @@ export function inputDirection(x: number, y: number): Vec {
 
 /**
  * One frame of walking: the new velocity, from the old one, the input direction (length up to 1)
- * and this moment's top speed (sneaking, a slow floor or Slimed lower it; the feel stays as snappy
- * because every ramp is timed against the top speed).
+ * and this moment's top speed (sneaking, a slow floor or a slowing status lower it; the feel
+ * stays as snappy because every ramp is timed against the top speed).
  */
 export function stepWalk(v: Vec, input: Vec, top: number, dt: number, t: MoveTuning = FEEL.move): Vec {
   const len = Math.hypot(input.x, input.y);

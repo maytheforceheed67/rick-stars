@@ -100,17 +100,49 @@ There are 27 items to find (two of them unlocked by clearing the episode), plus 
 
 There are 8 new synergies (Good Boy Genius, Scary Morty, Frequent Flyer, Tea for Two, Counting to Zzz, Straight A's, Rope-a-Dope, Jet Lag) and one transformation. Hold any 3 of six dream items to become the **Lucid Dreamer**: a sleep mask, +25% damage, gently homing shots, and kills that sometimes leave a healing dream bubble.
 
+## Game feel
+
+- **Shots leave the weapon.**
+  - Morty holds his weapon where you can see it. It turns with the aim, flips so it's never upside down, and goes behind him when he aims up.
+  - Shots start at the muzzle, with a flash, a kick of recoil and a small nudge to Morty. If the muzzle is inside a wall, the shot pops against the wall right there.
+  - Thrown weapons (garage junk, dodgeballs, rubber ducks, tennis balls) swing through instead, and the next one is already back in his hand.
+  - A click is never lost. It fires on the same frame if the weapon is ready, or the moment it's ready if it's still cooling down.
+  - Enemies with guns (gromflomite guards and snipers, dream soldiers, dog troopers) fire from their guns too.
+- **You can tell every shot apart by shape alone.** Morty's shots are white-hot bolts edged in the weapon's color, pointing along their path with a short trail; thrown things keep their own shape, with a bright rim. Enemy shots are round, warm-colored blobs with a dark outline.
+- **Every hit lands visibly.** The enemy flashes solid white, squashes, gets shoved along the shot and sprays sparks, with a hit sound of its own. Shields and Scary Terry clink and throw the sparks back; frozen enemies crack. A volley that lands many hits at once caps its hit sounds and merges its sparks.
+- **Movement.**
+  - Morty reaches full speed in about 0.08 s and stops dead in about 0.06 s. Turning around brakes harder than stopping, and diagonals are exactly as fast as straight lines.
+  - He walks with his feet and arms swinging (a four-frame cycle), bobbing twice a stride and leaning into the way he's going. He breathes when he stands still.
+  - Dust puffs up when he sets off, stops or turns sharply, and every few steps on grass, dirt and streets. A dash stretches him out on launch and squashes him on landing.
+  - He faces where he's walking, except while shooting and for 0.4 s after the last shot, when he faces the aim. Everyone walking in a scene walks the same way, Rick included.
+- **Slowdowns show on Morty:** goo on his shoes when Slimed, casts and a limp with Broken Legs, a customs stamp when Stamped, ripples on a slow floor. The first time each one happens in a run, a short toast says why he's slow.
+- **Getting hurt never hides the danger.**
+  - A hit lights up only the edge of the screen in red, for 0.1 s. The middle, where the bullets are, stays clear.
+  - Morty then blinks between his own colors and a bright red tint while he can't be hurt. He never fades out.
+  - Every full-screen flash goes through one rule: explosions (the neutrino bomb included), the Rick call, boss kills, dream shifts, blown cover and the lava moment. A flash is never solid, and it stays at 25% opacity or less whenever there are enemy shots or hazards on screen.
+
+The settings (on the title screen, the pause menu and the TV in the Garage) change how it looks:
+
+| Setting | What it does |
+|---|---|
+| Screen shake | Off turns off camera shake, the small camera kick on each shot and the camera tilt when the plane banks |
+| Reduced flashing | On turns the hurt glow into a thin red border and Morty's blink into a slow pulse. Full-screen flashes become a faint tint. Enemies flash pale pink instead of white when hit, and warnings pulse gently instead of flickering |
+| Damage numbers | On shows numbers floating up from hits (off by default) |
+
+Every number behind all this lives in `FEEL` in `src/content/balance.ts` (`weapon`, `move`, `hits`, `hurt`, `flash`), and `tests/feel.test.ts` holds the game to them.
+
 ## Debug mode
 
 Add `?debug=1` to the URL, for example http://localhost:5173/?debug=1 (or `#debug` at the end of the URL where query strings don't get through, such as a hosted copy). A **DEBUG** panel sits in the bottom-left corner; click it to expand it. It has:
 
 - an FPS counter, god mode and a hitbox overlay;
+- **No statuses**, which clears Morty's statuses and blocks new ones, so you can judge his movement on its own (the switches carry over to the next run);
 - jumping to any act or room, revealing the map, finishing the current finale stage and taking the exit;
 - giving any item, spawning any enemy (normal or elite), filling the Rick Meter and killing everything;
 - a stress test with 40 enemies and 200 projectiles;
 - restarting the run with a typed seed.
 
-The same tools are on `window.rickStars` in the browser console. For example: `rickStars.startRun({ seed: 'ABCDEFGH', act: 2 })`, `rickStars.startRun({ episode: 'S01E02', act: 3 })`, `rickStars.give('neutrino-bomb')`, `rickStars.state()`.
+The same tools are on `window.rickStars` in the browser console. For example: `rickStars.startRun({ seed: 'ABCDEFGH', act: 2 })`, `rickStars.startRun({ episode: 'S01E02', act: 3 })`, `rickStars.give('neutrino-bomb')`, `rickStars.state()`. Two more are there for looking at game feel: `rickStars.noStatuses(true)` does what the panel switch does, and `rickStars.slowMo(0.1, 5)` runs the game at a tenth of its speed for 5 seconds, so you can watch a shot leave the muzzle or a hit land.
 
 ## Architecture
 
@@ -127,14 +159,16 @@ src/
     dungeon/         ASCII room templates and Isaac-style floor generation
     effects/         stats, status effects, inventory and the item hook system
     run/             the state of the current run
-    runtime/         Phaser objects: player, enemies, pooled projectiles, telegraphs, rooms, fx
+    runtime/         Phaser objects: player, enemies, pooled projectiles, telegraphs, rooms, fx;
+                     plus the pure rules for aiming, walking and flashes (aim.ts, motion.ts,
+                     flashes.ts)
     save/            versioned save with migrations
     audio/           WebAudio sound effects (including a proper burp) and step-sequenced music
     art/             drawing helpers; bakes code-drawn art into textures at boot
     ui/              menus, text styles, the HUD's data model
   content/
     registry.ts      the only file that lists episodes
-    balance.ts       the numbers that tune difficulty and pacing
+    balance.ts       the numbers that tune difficulty, pacing and game feel (FEEL)
     shared/          characters, items, upgrades and lines used across episodes
     episodes/s01e01-pilot/
       episode.ts  acts.ts  enemies.ts  bosses.ts  hazards.ts  items.ts  weapons.ts
@@ -193,7 +227,7 @@ The brief sketched a folder layout and some types. The code follows it, with the
   - The room count lives in `ActDef.layout`, and Rick's gadget is `ActDef.rick.gadget`.
   - Each act has one special room.
 - **Two extra overlay scenes:** `Hud` and `Pause`.
-- **What `balance.ts` holds:** player stats, enemy and boss HP and speed, the Rick Meter, the economy and the Pilot's mechanics. Numbers that define one specific item, status or attack pattern (a flask's heal, a dodgeball's throw speed) live next to that content.
+- **What `balance.ts` holds:** player stats, enemy and boss HP and speed, the Rick Meter, the economy, the Pilot's mechanics and the game-feel numbers (`FEEL`). Numbers that define one specific item, status or attack pattern (a flask's heal, a dodgeball's throw speed) live next to that content.
 - **Dialogue.** `dialogue.ts` holds what's said during play; cutscene text stays in `cutscenes.ts`.
 
 ## Tests
@@ -207,20 +241,15 @@ The brief sketched a folder layout and some types. The code follows it, with the
 | `tests/weapons.test.ts` | Every act with enemies gets a story weapon with a speaker and a line, and scripted hand-overs exist in the episode's code. The Pilot's weapon order. Shot items carry over between weapons. Hits to kill from each act's weapon, in both episodes: 2–4 for regular enemies (summons included), 5–8 for elites. Boss fights last 60–90 seconds. |
 | `tests/lawnmower-dog.test.ts` | The act order and who plays each act. The Jerry cutaways stay quiet (unarmed, no enemies, no loot). The weapon beats. Both bosses give in instead of dying. At least 20 items, 6 synergies, the transformation and 6 enemy kinds per fight. Canon gating: Snuffles, Scary Terry, Mrs. Pancakes and friends at S01E02, Goldenfold still a Pilot character, nothing from S01E03 or later, nothing leaking back into the Pilot. The clear unlocks land in the right pools, and Anatomy Park is next. Scary Terry is a stalker. What the finger blades, parachute, tennis balls and Lucid Dreamer actually do. |
 | `tests/save.test.ts` | A fresh save, a round-trip, v1 and v2 fixtures migrating, corrupt-save backup and reset, out-of-range values cleaned up |
+| `tests/feel.test.ts` | Game feel. Every story weapon has something in hand. The muzzle sits out along the aim for every weapon and angle, and a shot whose muzzle is inside a wall pops at the wall. Input buffering: a press when ready fires the same frame, and a press during the cooldown fires the moment it ends. Enemy shots are round and Morty's are long bolts. Movement: the start and stop times, stopping distance, turn braking, diagonals within 2%, the same ramp when slowed, the walk cycle, and walk frames for everyone who walks in scenes. Flashes: the hurt glow lasts 80–120 ms and leaves the middle of the screen clear, every full-screen flash in the code stays at 25% or less with bullets on screen, and the blink is a tint that never fades Morty out. |
 
 ## Not yet implemented
 
 - **Stretch goals:** gamepad support, key rebinding, mid-run save and quit, and the "nursing home" par time. Quitting a run from the pause menu ends it and banks half your Scrap, the same as a death.
 - **Episodes after Lawnmower Dog.** S01E03 to S01E11 are listed as "coming soon", and later seasons show as one locked row.
-- **The game-feel pass in `prompts/03-game-feel.md` hasn't been built yet.** That covers:
-  - shots leaving from the weapon's muzzle, with a flash and recoil;
-  - player bolts that look different from enemy bullets;
-  - clearer hit reactions;
-  - movement with acceleration, a walk cycle and turn braking;
-  - damage feedback that doesn't cover the screen.
-
-  Enemy guns don't fire from a muzzle either; their shots start at the enemy's center.
+- **Only enemies with guns fire from a muzzle.** Everything else still attacks from its body: critters that spit, jocks and lockers that throw, bosses' patterns and hazards' sweeps.
 - **60 FPS on real hardware hasn't been measured.** Projectiles and effects are pooled, and the debug panel has a 40-enemy, 200-projectile stress test. But the game has only been run in a headless browser with software rendering, where it stays well under 60 FPS even when idle. It's still unknown whether a real GPU holds 60 FPS under that load.
+  - That includes the game-feel pass. It was checked frame by frame in slow motion and against the numbers in `FEEL`, but nobody has yet played it at full speed to judge how it feels.
 - **Balance hasn't been playtested by people.** The numbers in `balance.ts` are first-pass values, so the 20–30 minute run length is a target, not a measurement. Neither episode has been won start to finish by a person at normal speed.
   - Automated browser runs have played every act and finale of both episodes end to end with no console errors, using debug shortcuts to get through fights.
   - Scripted input separately played through the fights and scenes with real keyboard and mouse. For the Pilot, that meant both boss fights, the shoes, the customs queue, a shop purchase and the epilogue. For Lawnmower Dog, with god mode on, it meant every act, both Jerry cutaways, the Goldenfold and Snowball fights and the ending.
