@@ -3,7 +3,7 @@ import { createRegistry } from '../src/content/registry';
 import { buildFixedFloor, generateFloor, type Floor, type FloorConfig } from '../src/engine/dungeon/generate';
 import { episodeActs } from '../src/engine/registry';
 import { Rng } from '../src/engine/rng';
-import type { ActDef } from '../src/engine/types';
+import type { ActDef, FixedLayout } from '../src/engine/types';
 
 const reg = createRegistry();
 
@@ -23,12 +23,15 @@ function floorConfig(act: ActDef): FloorConfig {
   };
 }
 
-function reachable(floor: Floor): Set<number> {
+/** Rooms reachable from the start through doors, plus any story trips (Rick's ship across town). */
+function reachable(floor: Floor, trips: FixedLayout['trips'] = []): Set<number> {
+  const at = (p: { x: number; y: number }) => floor.rooms.find((r) => r.x === p.x && r.y === p.y)?.id;
   const seen = new Set([floor.startId]);
   const queue = [floor.startId];
   while (queue.length) {
     const r = floor.rooms[queue.shift()!];
-    for (const n of Object.values(r.neighbors)) {
+    const byTrip = trips.filter((t) => at(t.from) === r.id).map((t) => at(t.to));
+    for (const n of [...Object.values(r.neighbors), ...byTrip]) {
       if (n === undefined || seen.has(n)) continue;
       seen.add(n);
       queue.push(n);
@@ -117,7 +120,7 @@ describe('floor generation', () => {
       for (const act of episodeActs(ep)) {
         if (act.layout.kind !== 'fixed') continue;
         const floor = buildFixedFloor(act.layout);
-        expect(reachable(floor).size).toBe(floor.rooms.length);
+        expect(reachable(floor, act.layout.trips).size, act.id).toBe(floor.rooms.length);
       }
     }
   });

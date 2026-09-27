@@ -292,6 +292,7 @@ export function validateRegistry(reg: Registry): string[] {
       }
 
       act.finale.forEach((stage, i) => {
+        if (stage.biome && !reg.music.has(stage.biome.music)) err(`${where}: finale biome "${stage.biome.id}" music "${stage.biome.music}" doesn't exist`);
         // The first stage is a dead end on the floor grid, so its door may be on any side.
         const doors: Dir[] = i === 0 && act.layout.kind === 'procedural' ? [...DIRS] : [];
         if (stage.kind === 'boss') {
@@ -329,6 +330,11 @@ export function validateRegistry(reg: Registry): string[] {
         if (layout.roomCount[0] < 4 || layout.roomCount[0] > layout.roomCount[1]) err(`${where}: bad roomCount`);
       } else {
         const floor = buildFixedFloor(layout);
+        for (const trip of layout.trips ?? []) {
+          for (const end of [trip.from, trip.to]) {
+            if (!floor.rooms.some((r) => r.x === end.x && r.y === end.y)) err(`${where}: trip end ${end.x},${end.y} isn't a room`);
+          }
+        }
         for (const r of floor.rooms) {
           const doors = Object.keys(r.neighbors) as Dir[];
           checkTemplateId(r.template, `${where} fixed room ${r.x},${r.y}`, doors);

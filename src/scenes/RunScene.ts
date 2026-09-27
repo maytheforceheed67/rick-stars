@@ -49,6 +49,7 @@ import type {
   MechanicDef,
   MechanicInstance,
   PlayerShotSpec,
+  PropHandle,
   PropSpec,
   RoomInfo,
   RoomKind,
@@ -1053,7 +1054,8 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const run = this.run;
     const act = run.act;
     const region = this.regionOf(fr);
-    const biome = fr?.biome ?? this.regionBiome(region);
+    const stageAt = fr ? (fr.kind === 'finale' ? 0 : -1) : run.stage;
+    const biome = fr?.biome ?? (stageAt >= 0 ? act.finale[stageAt]?.biome : undefined) ?? this.regionBiome(region);
     const view = new RoomView(this, tpl, biome, doors, this.hashSeed() + id * 101);
     const newPlace = biome !== this.roomBiome && region !== this.roomRegion && this.roomRegion >= 0;
     this.roomBiome = biome;
@@ -1909,6 +1911,20 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
     const s = this.player.sprite;
     s.setScale(1).setAngle(0).setAlpha(1);
     this.player.iframes = 0;
+  }
+
+  /** A story trip within a fixed layout: out by ship or portal, into a room doors don't reach. */
+  private travelTo(to: { x: number; y: number }, by: TravelKind, from?: PropHandle): void {
+    const floor = this.run.floor;
+    const target = floor?.rooms.find((r) => r.x === to.x && r.y === to.y);
+    if (!target || this.traveling) return;
+    const exit = from ? ((this.objects.props.find((p) => p === from) as PropObj | undefined) ?? null) : null;
+    this.travelOut({ by, label: '' }, exit, () => {
+      this.clearTravelFx();
+      this.player.setControlLocked(false);
+      this.enterRoom(target.id);
+      this.arrive(by);
+    });
   }
 
   /** Arriving the way the story says: out of a portal, or the ship setting down. */
@@ -3199,6 +3215,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       after: (s: number, fn: () => void) => this.after(s, fn, true),
       giveActWeapon: () => this.giveActWeapon(),
       actScene: (steps: SceneStep[], done?: () => void) => this.playScene(steps, done),
+      travelTo: (to: { x: number; y: number }, by: TravelKind, from?: PropHandle) => this.travelTo(to, by, from),
     };
     return Object.assign(Object.create(this.ctx) as GameCtx, extra) as RoomScriptApi;
   }

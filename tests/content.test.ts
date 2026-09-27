@@ -14,10 +14,10 @@ describe('content registry', () => {
     expect(validateRegistry(reg)).toEqual([]);
   });
 
-  it('lists all of Season 1, with only the Pilot playable for now', () => {
+  it('lists all of Season 1, with the Pilot and Lawnmower Dog playable', () => {
     const s1 = LISTINGS.filter((l) => l.season === 1);
     expect(s1).toHaveLength(11);
-    expect(s1.filter((l) => l.def).map((l) => l.id)).toEqual(['S01E01']);
+    expect(s1.filter((l) => l.def).map((l) => l.id)).toEqual(['S01E01', 'S01E02']);
     expect(s1[1].title).toBe('Lawnmower Dog');
   });
 
@@ -45,7 +45,8 @@ describe('content registry', () => {
   it('has no generic exits: every act but the last leaves by ship, portal or departure', () => {
     for (const ep of reg.episodes.values()) {
       const acts = episodeActs(ep);
-      acts.slice(0, -1).forEach((act) => {
+      // Interludes cut away to another character and back instead of traveling.
+      acts.slice(0, -1).filter((act) => !act.interlude).forEach((act) => {
         expect(act.travel, `${ep.id} ${act.id}`).toBeDefined();
         expect(['ship', 'portal', 'departure']).toContain(act.travel!.by);
       });

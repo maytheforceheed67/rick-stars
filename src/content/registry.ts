@@ -5,12 +5,13 @@
 import { buildRegistry, type Registry } from '../engine/registry';
 import type { EpisodeListing } from '../engine/types';
 import { pilot } from './episodes/s01e01-pilot/episode';
+import { lawnmowerDog } from './episodes/s01e02-lawnmower-dog/episode';
 import { SHARED } from './shared';
 import { UPGRADES } from './shared/upgrades';
 
 export const LISTINGS: EpisodeListing[] = [
   { id: 'S01E01', season: 1, number: 1, title: 'Pilot', def: pilot },
-  { id: 'S01E02', season: 1, number: 2, title: 'Lawnmower Dog' },
+  { id: 'S01E02', season: 1, number: 2, title: 'Lawnmower Dog', def: lawnmowerDog },
   { id: 'S01E03', season: 1, number: 3, title: 'Anatomy Park' },
   { id: 'S01E04', season: 1, number: 4, title: 'M. Night Shaym-Aliens!' },
   { id: 'S01E05', season: 1, number: 5, title: 'Meeseeks and Destroy' },

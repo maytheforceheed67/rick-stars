@@ -323,3 +323,76 @@ export const PILOT = {
   frank: { hp: 420, speed: 115, phases: [0.66, 0.33], wallStagger: 1.4, flurryStagger: 0.8 },
   supervisor: { hp: 560, speed: 90, phases: [0.66, 0.33], slamStagger: 1.2 },
 };
+
+/**
+ * S01E02 "Lawnmower Dog". Enemy HP is tuned against each act's dreamed-up weapon: the Imagined
+ * Ray Gun (Goldenfold's dream), the Rubber Duck Launcher (dreams within dreams), Laser Cat
+ * (Terry's school, where the Pilot's school enemies come along) and the Tennis Ball Launcher
+ * (Snowball's world).
+ */
+export const LAWNMOWER_DOG = {
+  enemies: {
+    // Goldenfold's dream: the plane
+    'dream-passenger': { hp: 9, speed: 125 },
+    'flight-attendant': { hp: 10, speed: 95 },
+    'dream-soldier': { hp: 12, speed: 105 },
+    'snack-cart': { hp: 15, speed: 80 },
+    'turbulence-cloud': { hp: 10, speed: 60 },
+    'lost-luggage': { hp: 13, speed: 40 },
+    'carry-on': { hp: 5, speed: 150 },
+    'dream-machine-gun': { hp: 8, speed: 0 },
+    // Dreams within dreams
+    'counting-sheep': { hp: 10, speed: 95 },
+    'windup-soldier': { hp: 11, speed: 90 },
+    'teddy-bruiser': { hp: 17, speed: 70 },
+    'jack-in-the-box': { hp: 12, speed: 0 },
+    'tea-party-doll': { hp: 10, speed: 85 },
+    'music-box': { hp: 14, speed: 0 },
+    'twirl-dancer': { hp: 5, speed: 160 },
+    // Terry's dream school
+    'mocking-kid': { hp: 9, speed: 100 },
+    'failing-grade': { hp: 15, speed: 65 },
+    'laughing-mouth': { hp: 11, speed: 70 },
+    // Snowball's world
+    'helmet-pup': { hp: 8, speed: 150 },
+    'dog-trooper': { hp: 13, speed: 100 },
+    'robo-bulldog': { hp: 17, speed: 75 },
+    'drool-mastiff': { hp: 14, speed: 70 },
+    'medic-poodle': { hp: 11, speed: 90 },
+    'kennel-master': { hp: 14, speed: 80 },
+    // Interludes: Snuffles dodging Jerry
+    'snuffles-dodger': { hp: 50, speed: 150 },
+  },
+  support: {
+    /** Flight attendants: "please remain seated" hastes and patches up the passengers. */
+    service: { every: [3.5, 4.5] as [number, number], radius: 220, haste: 3.5, heal: 3 },
+    /** Tea party dolls pour a healing cup for the toys around them. */
+    tea: { every: 4, radius: 180, healShare: 0.3 },
+    /** Medic poodles toss biscuits that heal and shield. */
+    biscuit: { every: 4, radius: 240, shieldHits: 1, heal: 3 },
+    luggage: { every: 2.6, max: 3 },
+    musicBox: { every: 2.4, max: 3 },
+    kennel: { every: 4.5, max: 3 },
+  },
+  /** Goldenfold's dream control (Act 1): every few seconds of a fight, the dream shifts. */
+  dreamControl: { every: [9, 13] as [number, number], tiltSeconds: 3.2, tiltPush: 150, tiltAngle: 0.07, wallSpeed: 170, guns: 2 },
+  /**
+   * Scary Terry (Act 2) steps into Morty's room `delay` seconds after he does, or `followDelay`
+   * after Morty runs from a room Terry was in. Diving into another dreamer's dream (a sleeper
+   * prop, or crossing into the next dream) buys `afterDive` seconds.
+   */
+  terry: { delay: 8, followDelay: 3.5, afterDive: 26, firstArrival: 4, speed: 150, staggerHits: 6, staggerSeconds: 1.8, dreamerChance: 0.5 },
+  /** Little Terry's confidence (Act 3), out of 100. */
+  confidence: { start: 30, perRoom: 12, perAnswer: 10, mockHit: 5, mockEvery: 3.2, mockRadius: 260, pepTalkAt: 70 },
+  /** Goldenfold's floorboards (the prologue): noise from each creak and how fast it fades. */
+  creak: { board: 38, walking: 7, decay: 14, radius: 30 },
+  /** The chase into Terry's house (Act 2 finale). */
+  chase: { seconds: 45, spawnEvery: 2.2, maxEnemies: 8 },
+  /** The climb back up through the dreams (Act 3 finale). */
+  climb: { waves: 4, waveSize: [3, 4] as [number, number], maxEnemies: 9 },
+  /** Snuffles getting smarter: how many times Jerry has to catch him. */
+  jerryCatches: 3,
+  /** Bosses: HP for a 60-90 second fight with the act's weapon, and where each phase starts. */
+  goldenfold: { hp: 480, speed: 100, phases: [0.66, 0.33], hailStagger: 1.3, guns: 2 },
+  snowball: { hp: 460, speed: 95, phases: [0.66, 0.33], chargeStagger: 1.2, pups: 2 },
+};

@@ -765,6 +765,12 @@ export interface RoomScriptApi extends GameCtx {
    * Morty can't move meanwhile, and any key skips ahead. onDone runs when it's over.
    */
   actScene(steps: SceneStep[], onDone?: () => void): void;
+  /**
+   * A story trip inside a fixed layout: Morty leaves the way `by` says (climbing into Rick's ship,
+   * stepping into a portal) and lands in the room at grid spot (x, y), which doors don't reach.
+   * `from` is the prop he boards, if any.
+   */
+  travelTo(to: { x: number; y: number }, by: TravelKind, from?: PropHandle): void;
 }
 
 /** Where a scene character stands or walks to: a spot, or next to another character. */
@@ -949,9 +955,10 @@ export interface BiomeStyle {
   doors?: 'plain' | 'classroom' | 'arch' | 'gate' | 'house';
 }
 
+/** A finale stage. `biome` makes its room look like somewhere else (the chase into Terry's house). */
 export type FinaleStage =
-  | { kind: 'boss'; boss: ContentId; template: ContentId }
-  | { kind: 'encounter'; encounter: ContentId };
+  | { kind: 'boss'; boss: ContentId; template: ContentId; biome?: BiomeDef }
+  | { kind: 'encounter'; encounter: ContentId; biome?: BiomeDef };
 
 export interface ProceduralLayout {
   kind: 'procedural';
@@ -984,6 +991,11 @@ export interface FixedLayout {
   kind: 'fixed';
   rooms: FixedRoomDef[];
   start: { x: number; y: number };
+  /**
+   * Story trips between rooms no door connects (Rick's ship across town). A room script makes
+   * the trip (RoomScriptApi.travelTo); listing it here tells the checks the rooms are linked.
+   */
+  trips?: { from: { x: number; y: number }; to: { x: number; y: number } }[];
 }
 
 /**
