@@ -2,6 +2,7 @@
 import type { ActDef, BiomeDef, Weighted } from '../../../engine/types';
 import { LINES, RICK_ALONG_35C, RICK_ALONG_CUSTOMS } from './dialogue';
 import { C35_COMBAT, CUSTOMS_COMBAT, CUSTOMS_QUEUES, SCHOOL_COMBAT } from './rooms';
+import { arrival35c, customsArrival } from './scenes';
 
 const RICK = { gadget: 'freeze-ray', entrance: 'walk' } as const;
 const w = (id: string, weight: number): Weighted => ({ id, weight });
@@ -25,6 +26,29 @@ export const SMITH_NIGHT: BiomeDef = {
     door: 0x8a6d4b,
   },
   floorPattern: 'planks',
+  music: 'calm',
+};
+
+/** Inside Rick's ship: junk-built consoles under the night sky. */
+export const SHIP_NIGHT: BiomeDef = {
+  id: 'ricks-ship-night',
+  style: { walls: 'panels', blocks: 'counter', doors: 'plain' },
+  name: "Rick's Ship",
+  palette: {
+    background: 0x070b1c,
+    floor: 0x59636e,
+    floorAlt: 0x4c555f,
+    wall: 0x44505e,
+    wallTop: 0x5d6b7b,
+    block: 0x8a6d4b,
+    blockTop: 0xa8885f,
+    cliff: 0x333344,
+    cliffShadow: 0x222233,
+    slow: 0x5a7fbf,
+    accent: 0x97ce4c,
+    door: 0x3d4a5c,
+  },
+  floorPattern: 'grid',
   music: 'calm',
 };
 
@@ -128,7 +152,7 @@ export const PROLOGUE: ActDef = {
     rooms: [
       { x: 0, y: 0, kind: 'start', template: 'pilot-bedroom', script: 'pilot-bedroom' },
       { x: 1, y: 0, kind: 'combat', template: 'pilot-garage', script: 'pilot-garage' },
-      { x: 2, y: 0, kind: 'finale', template: 'pilot-cockpit' },
+      { x: 2, y: 0, kind: 'finale', template: 'pilot-cockpit', biome: SHIP_NIGHT },
     ],
   },
   enemyPool: [w('junk-drone', 1)],
@@ -242,7 +266,8 @@ export const DIMENSION_35C: ActDef = {
   // Rick is with Morty the whole time in 35-C.
   rick: { ...RICK, follows: RICK_ALONG_35C },
   mechanics: ['grappling-shoes'],
-  intro: ['pilot-35c-arrival'],
+  // Rick walks out of the portal behind Morty, explains the place and tosses him the spare gun.
+  opening: arrival35c,
   outro: ['pilot-35c-outro'],
   arrive: 'portal',
   // The portal gun is empty, so it's the public transit portal to Customs.
@@ -307,7 +332,7 @@ export const CUSTOMS: ActDef = {
   weapon: { item: 'ricks-ray-gun', when: 'scripted', from: 'rick', line: LINES.rick.takeMyGun },
   rick: { ...RICK, follows: RICK_ALONG_CUSTOMS },
   mechanics: ['suspicion'],
-  intro: ['pilot-customs-intro'],
+  opening: customsArrival,
   outro: ['pilot-customs-outro'],
   arrive: 'departure',
   stageExit: { art: 'exit-gate', label: 'Into the departure hall' },

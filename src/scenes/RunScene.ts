@@ -921,8 +921,14 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       this.enterRoom(floor.startId);
       if (act.arrive) this.arrive(act.arrive);
       this.hud.banner(act.name, act.subtitle);
-      // A beat after arriving, and never later than the first room he walks into.
+      // A beat after arriving, and never later than the first room he walks into. An opening
+      // scene usually hands it over itself; if not, it comes once the scene is over.
       if (act.weapon?.when === 'start') this.weaponDue = run.time + 1.6;
+      if (act.opening && this.scriptApi) {
+        // The opening brings Rick on itself (out of the portal behind Morty).
+        this.stage.clear();
+        this.playScene(act.opening(this.scriptApi), () => this.placeRickBuddy());
+      }
     });
   }
 
@@ -1020,7 +1026,7 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
   private buildRoom(tpl: ParsedTemplate, doors: DoorSpec[], st: RoomState, id: number, fr: FloorRoom | null, firstVisit: boolean, from?: Dir): void {
     const run = this.run;
     const act = run.act;
-    const view = new RoomView(this, tpl, act.biome, doors, this.hashSeed() + id * 101);
+    const view = new RoomView(this, tpl, fr?.biome ?? act.biome, doors, this.hashSeed() + id * 101);
     this.roomView = view;
     this.roomState = st;
     this.colliders = [
@@ -2676,13 +2682,19 @@ export class RunScene extends Phaser.Scene implements EnemyHost, PlayerHost {
       },
       spriteKey: (who) => this.reg.characters.get(who)?.sprite?.key ?? null,
       say: (who, text, seconds) => this.say(who, text, seconds),
-      setAnchor: (who, anchor) => {
+      setAnchor: (who, anchor, previous) => {
         if (anchor) this.actors.set(who, anchor);
-        else this.actors.delete(who);
+        else if (!previous || this.actors.get(who) === previous) this.actors.delete(who);
       },
       doorNear: (to) => this.doorNear(to),
       clamp: (p) => this.clampToRoom(p),
       sfx: (id) => this.sfx(id),
+      giveWeapon: () => {
+        const w = this.run.act.weapon;
+        if (!w || this.run.inventory.weapon === w.item) return 0;
+        this.giveActWeapon();
+        return readTime(w.line) + 0.3;
+      },
     });
   }
 

@@ -13,14 +13,6 @@ export const PILOT_CUTSCENES: CutsceneDef[] = [
     { backdrop: 'bedroom-night', speaker: 'morty', expression: 'sleepy', text: "Rick? It's, like, three in the morning..." },
     { backdrop: 'bedroom-night', speaker: 'rick', expression: 'drunk', text: 'Garage, Morty. Now. It\'s important. Or it isn\'t. Come find out!' },
   ], 'Just a Test'),
-  cs('pilot-flight', [
-    { backdrop: 'car-night', text: "Rick's flying car. Built from garage junk. Airborne. Somehow.", caption: true, sfx: 'portal' },
-    { backdrop: 'car-night', speaker: 'rick', expression: 'drunk', text: "I'm gonna drop a neutrino bomb, Morty. Wipe the slate clean. Start humanity over from scratch." },
-    { backdrop: 'car-night', speaker: 'morty', expression: 'scared', text: "W-what?! Rick, no! You can't just blow up the whole world!" },
-    { backdrop: 'car-night', speaker: 'morty', expression: 'angry', text: 'Land the car, Rick! Land it right now!' },
-    { backdrop: 'car-night', speaker: 'rick', expression: 'happy', text: 'Ha! See? You stood up to me! It was a test, Morty. Assertiveness. You passed. Now I\'m gonna... *snore*' },
-    { backdrop: 'car-night', text: 'Rick passes out. The neutrino bomb is still armed.', caption: true, sfx: 'snore' },
-  ]),
   cs('pilot-breakfast', [
     { backdrop: 'kitchen', text: 'The next morning.', caption: true },
     { backdrop: 'kitchen', speaker: 'jerry', expression: 'angry', cast: ['beth'], text: 'Your father keeps Morty out all night, Beth. He\'s failing math!' },
@@ -46,14 +38,6 @@ export const PILOT_CUTSCENES: CutsceneDef[] = [
     { backdrop: 'principal-office', speaker: 'jerry', expression: 'angry', text: 'SEVEN HOURS?!' },
     { backdrop: 'principal-office', speaker: 'beth', expression: 'sad', text: "Okay. That's it. Dad's going to a nursing home." },
   ]),
-  cs('pilot-35c-arrival', [
-    { backdrop: 'hills-35c', text: 'Dimension 35-C.', caption: true, sfx: 'portal' },
-    { backdrop: 'hills-35c', speaker: 'rick', expression: 'normal', text: 'Welcome to Dimension 35-C, Morty. Perfect conditions for Mega Trees.' },
-    { backdrop: 'hills-35c', speaker: 'rick', expression: 'normal', text: 'Mega Trees grow Mega Fruit. Mega Fruit hold Mega Seeds. I need the seeds for my research. Don\'t ask.' },
-    { backdrop: 'hills-35c', speaker: 'morty', expression: 'angry', text: "Rick, I'm supposed to be in school!" },
-    { backdrop: 'hills-35c', speaker: 'rick', expression: 'normal', text: 'Here. Grappling shoes. You can walk on cliffs. Just remember to turn them on.' },
-    { backdrop: 'hills-35c', speaker: 'morty', expression: 'scared', text: 'Turn them on how? Rick? RICK?' },
-  ], 'Act 2'),
   cs('pilot-serum', [
     { backdrop: 'cliff-35c', text: 'Morty did not turn on his shoes.', caption: true },
     { backdrop: 'cliff-35c', speaker: 'morty', expression: 'scared', text: 'AAAH! My legs! Rick, my legs are broken!' },
@@ -69,19 +53,6 @@ export const PILOT_CUTSCENES: CutsceneDef[] = [
     { backdrop: 'hills-35c', speaker: 'morty', expression: 'scared', text: 'Where?' },
     { backdrop: 'hills-35c', speaker: 'rick', expression: 'normal', text: 'You know where, Morty.' },
     { backdrop: 'hills-35c', speaker: 'morty', expression: 'sick', text: 'Aw geez.' },
-  ]),
-  cs('pilot-customs-intro', [
-    { backdrop: 'customs', text: 'Interdimensional Customs. The longest line in the multiverse.', caption: true },
-    { backdrop: 'customs', speaker: 'gromflomite', expression: 'normal', text: 'NEXT. Anything to declare?' },
-    { backdrop: 'customs', speaker: 'rick', expression: 'normal', text: "Act natural, Morty. Walk slow. Don't run, don't dash, don't shoot anybody. Yet." },
-    { backdrop: 'customs', speaker: 'morty', expression: 'sick', text: "I'm walking really weird, Rick." },
-  ], 'Act 3'),
-  cs('pilot-cover-blown', [
-    { backdrop: 'customs', text: 'BEEP. BEEP. BEEP.', caption: true, sfx: 'alarm' },
-    { backdrop: 'customs', speaker: 'gromflomite', expression: 'angry', text: 'Seed contraband detected! Lock it down!' },
-    { backdrop: 'customs', speaker: 'rick', expression: 'normal', text: 'Welp. Plan B.' },
-    { backdrop: 'customs', speaker: 'morty', expression: 'scared', text: "Rick, I can't shoot people!" },
-    { backdrop: 'customs', speaker: 'rick', expression: 'normal', text: "They're robots, Morty. Totally robots." },
   ]),
   cs('pilot-customs-outro', [
     { backdrop: 'portal', text: 'Through the portal. Home.', caption: true, sfx: 'portal' },

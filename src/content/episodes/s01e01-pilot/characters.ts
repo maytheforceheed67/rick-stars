@@ -48,6 +48,7 @@ export const gromflomite: CharacterDef = {
   firstAppears: 'S01E01',
   canon: true,
   color: 0x8fb573,
+  sprite: PILOT_ENEMY_ART.clerk,
   portrait: (g, S) => bugPortrait(g, S),
 };
 

@@ -6,7 +6,7 @@
  */
 import { FLOOR_GRID } from '../constants';
 import type { Rng } from '../rng';
-import type { ContentId, FixedLayout, RoomKind } from '../types';
+import type { BiomeDef, ContentId, FixedLayout, RoomKind } from '../types';
 import { DIRS, DIR_VEC, type Dir } from './templates';
 
 export interface FloorRoom {
@@ -18,6 +18,8 @@ export interface FloorRoom {
   specialId?: ContentId;
   /** Script for fixed-layout rooms. */
   script?: ContentId;
+  /** Fixed-layout rooms that look like somewhere else than the rest of the act. */
+  biome?: BiomeDef;
   /** Rooms between this one and the start room. */
   depth: number;
   /** Position in the calm prefix chain, if part of it. */
@@ -210,7 +212,7 @@ export function buildFixedFloor(layout: FixedLayout): Floor {
       const n = byPos.get(`${r.x + DIR_VEC[d].dx},${r.y + DIR_VEC[d].dy}`);
       if (n !== undefined) neighbors[d] = n;
     }
-    return { id: i, x: r.x, y: r.y, kind: r.kind, template: r.template, script: r.script, depth: 0, neighbors };
+    return { id: i, x: r.x, y: r.y, kind: r.kind, template: r.template, script: r.script, biome: r.biome, depth: 0, neighbors };
   });
   // Depth by breadth-first search from the start room.
   const seen = new Set([startIndex]);

@@ -5,6 +5,7 @@ import type { EncounterDef, EnemySelf, PropHandle, RoomScriptDef, Vec } from '..
 import { ECONOMY, PILOT } from '../../balance';
 import { DEFUSE_STEPS, EPILOGUE_QUESTIONS, LINES, type DefuseStep } from './dialogue';
 import { CUSTOMS_AGENTS } from './enemies';
+import { bombReveal } from './scenes';
 
 const S01E01 = 'S01E01' as const;
 
@@ -94,7 +95,9 @@ export const bombDefuse: EncounterDef = {
       onEnter(first) {
         const r = api.room.markers('R')[0];
         const b = api.room.markers('B')[0];
-        if (r) api.addProp({ art: 'rick-sleeping', x: r.x, y: r.y + 18, actor: 'rick' });
+        const sleeper = () => {
+          if (r) api.addProp({ art: 'rick-sleeping', x: r.x, y: r.y + 18, actor: 'rick' });
+        };
         if (b) {
           bomb = api.addProp({
             art: done ? 'neutrino-bomb-off' : 'neutrino-bomb',
@@ -115,9 +118,16 @@ export const bombDefuse: EncounterDef = {
                 },
           });
         }
-        if (!first || done) return;
+        if (!first || done) {
+          sleeper();
+          return;
+        }
         api.lockDoors();
-        api.playCutscene('pilot-flight', () => {
+        const passOut = () => {
+          sleeper();
+          api.sfx('snore');
+        };
+        api.actScene(bombReveal(r ?? { x: api.player.x + 300, y: api.player.y }, passOut), () => {
           armed = true;
           steps = pick();
           api.setTimer(B.seconds, 'BOMB');

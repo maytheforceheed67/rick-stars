@@ -55,7 +55,8 @@ Split things however reads best; the only fixed point is that `episode.ts` expor
 | `mechanics/` | One `MechanicDef` per episode mechanic |
 | `specialRooms.ts` | `SpecialRoomDef`s (one special room per act) |
 | `encounters.ts` | Finale `EncounterDef`s, plus `RoomScriptDef`s for fixed-layout rooms |
-| `cutscenes.ts` | `CutsceneDef`s (comic pages of 2–6 panels) |
+| `cutscenes.ts` | `CutsceneDef`s (comic pages of 2–6 panels) for quick recaps |
+| `scenes.ts` | In-engine scenes (`SceneStep` lists) for the big story beats |
 | `dialogue.ts` | Lines said during play: taunts, Rick's instructions, reactions |
 | `characters.ts` | New `CharacterDef`s (portrait, world sprite, speech color) |
 | `backdrops.ts` | Cutscene panel backgrounds |
@@ -153,6 +154,28 @@ Morty never pulls a weapon out of nowhere. **Every weapon he uses needs a story 
   - `sizeMult`, `speedMult`, `rangeMult`, `knockbackMult`, `bounces` and `sfx`.
 - **Each act's weapon replaces the last one.** Items that change shots (bounces, freezing, extra projectiles, hooks) apply to whatever Morty holds, so they carry over between acts.
 - **Balance against the weapon.** The hits-to-kill test uses each act's own weapon, so a hard-hitting weapon needs tougher enemies.
+
+## Make it feel like the show
+
+- **Travel between acts the way the episode does.** There are no generic exit doors between acts. Every act but the episode's last sets `travel: { by, label, art? }`, and the validator refuses one without it:
+  - `by: 'ship'`: Rick's flying car sets down in the finale room, Morty climbs in, and it lifts off across the sky;
+  - `by: 'portal'`: a green portal from Rick's portal gun;
+  - `by: 'departure'`: an official departure portal (Customs).
+
+  `arrive` says how Morty shows up at the start of an act (stepping out of a portal, the ship landing). An act with several finale stages can dress the way between them with `stageExit: { art, label }` (the Pilot's security gate into the departure hall).
+- **Rick comes along when the episode has him along.** `rick.follows` is a set of short lines (`enter`, `clear`, `hurt`, `item`, `idle`). With it, Rick walks with Morty through the act, comments now and then (burps included), can't be hurt and doesn't block shots. Calling him with a full meter is him stepping in.
+- **Act out the big beats in the room.** `ActDef.opening(api)` returns scene steps (see [In-engine scenes](#in-engine-scenes)) played in the first room right after Morty arrives: Rick walking out of the portal to explain Dimension 35-C and tossing Morty his spare gun. Put a story weapon's handover in a scene with the `{ kind: 'weapon' }` step. Comic cutscenes (`intro`, `outro`) are for quick recaps; keep them short.
+- **Make places look like themselves.** A biome's `style` picks how walls, blocks and doors are drawn:
+
+  | Field | Options |
+  |---|---|
+  | `walls` (walls and tall `#` blocks) | `bricks`, `lockers`, `hills`, `panels`, `house` |
+  | `blocks` (low `=` blocks) | `crate`, `desk`, `rock`, `counter`, `furniture` |
+  | `doors` (between rooms) | `plain`, `classroom`, `arch`, `gate`, `house` |
+
+  A room in a fixed layout can look like somewhere else with `biome` on its `FixedRoomDef` (the inside of Rick's ship in the Pilot's prologue).
+- **Every run opens with a title card** built from the episode's season, number and title. You don't need to add anything.
+- **The Garage is a room Morty walks around.** The workbench sells upgrades, the closet has shirts, the TV has stats and settings, and Rick's ship opens the Season Map as the ship's navigation screen. Episodes don't need to touch it.
 
 ## Rooms (`rooms.ts`)
 
@@ -318,7 +341,7 @@ All three get the room script API:
 
 ### In-engine scenes
 
-Big story beats should play out in the room, not only as comic panels. `api.actScene(steps, onDone)` runs a list of steps, one after another, while Morty stands still and can't be hurt. Space, Enter, E or a click skips ahead; every `do` step still runs, so skipping never loses a prop or a flag.
+Big story beats should play out in the room, not only as comic panels. `api.actScene(steps, onDone)` (or an act's `opening`) runs a list of steps, one after another, while Morty stands still and can't be hurt. Space, Enter or E skips ahead.
 
 | Step | Does |
 |---|---|
@@ -329,12 +352,15 @@ Big story beats should play out in the room, not only as comic panels. `api.actS
 | `{ kind: 'emote', who, emote: 'jump' \| 'shake' \| 'shock' }` | A little reaction |
 | `{ kind: 'beam', who, to, color, sfx? }` | A ray-gun beam (the freeze ray) |
 | `{ kind: 'wait', seconds }` | A pause |
-| `{ kind: 'do', fn }` | Runs code: swap a sprite, drop a prop, set a flag |
-| `{ kind: 'leave', who, via: 'door' \| 'portal' }` | Walks out, or leaves through a portal |
+| `{ kind: 'weapon' }` | The act's story weapon changes hands: its giver says the line and Morty catches it |
+| `{ kind: 'pose', who, art }` | Swaps a character's sprite (Rick passing out); `null` puts theirs back |
+| `{ kind: 'do', fn }` | Runs code: drop a prop, set a flag, play a sound |
+| `{ kind: 'leave', who, via: 'door' \| 'portal' \| 'here' }` | Walks out, leaves through a portal, or fades away |
 
 - **Who.** A `who` is a character id with a world sprite. The act's playable character is the player himself.
 - **Spots.** A spot is `{ x, y }`, or `{ near: 'rick', side?, gap? }` to stand next to someone.
-- **Example.** Frank's `dazed` hook in the Pilot's `bosses.ts`.
+- **Examples.** The Pilot's `scenes.ts` (the neutrino-bomb reveal in the ship, the 35-C arrival, the Customs desk and the cover being blown), and Frank's `dazed` hook in `bosses.ts`.
+- **Skipping.** Every `do`, `weapon` and `pose` step still runs, so a skipped scene ends in the same place.
 
 A script returns hooks: `onEnter(firstTime)`, `update(dt)`, `onExit()`, `onEnemiesCleared()`, `onBossDefeated()`. The Pilot's `encounters.ts` covers most patterns: a timed puzzle, waves, an escape run and a quiz.
 

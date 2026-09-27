@@ -8,6 +8,7 @@ import { checkTemplate, DIRS, parseTemplate, type Dir, type ParsedTemplate } fro
 import { ROOM_COLS, ROOM_ROWS } from './constants';
 import { availableIn, isEpisodeId } from './episodes';
 import { buildFixedFloor } from './dungeon/generate';
+import { ENGINE_SPRITES } from './art/engineSprites';
 import type {
   ActDef,
   BackdropDef,
@@ -221,8 +222,12 @@ export function validateRegistry(reg: Registry): string[] {
     for (const e of checkTemplate(t, src.rows, { doors, requireSpawns: opts.spawns, size })) err(`${where}: ${e}`);
   };
 
+  const engineArt = new Set(ENGINE_SPRITES.map((a) => a.key));
+  const artExists = (key: string) => reg.sprites.has(key) || engineArt.has(key);
+
   for (const ep of reg.episodes.values()) {
     const E = ep.id;
+    const sequence = episodeActs(ep);
     /** Referenced content must exist and must have appeared by episode E. */
     const gate = <T extends ContentMeta>(map: Map<ContentId, T>, id: ContentId, what: string, where: string): T | undefined => {
       const x = map.get(id);
@@ -234,7 +239,7 @@ export function validateRegistry(reg: Registry): string[] {
       return x;
     };
 
-    for (const act of episodeActs(ep)) {
+    for (const act of sequence) {
       const where = `${E} act "${act.id}"`;
       for (const id of [act.biome.music, act.music]) if (id && !reg.music.has(id)) err(`${where}: music track "${id}" doesn't exist`);
       gate(reg.characters, act.playable, 'character', where);
@@ -266,6 +271,11 @@ export function validateRegistry(reg: Registry): string[] {
       } else if (fights && !act.unarmed) {
         err(`${where}: has enemies but no story weapon (ActDef.weapon)`);
       }
+      // No generic exits between acts: Morty leaves the way the show does (ship, portal, departure).
+      if (act !== sequence[sequence.length - 1] && !act.travel) err(`${where}: needs a way to the next act (ActDef.travel)`);
+      if (act.travel?.art && !artExists(act.travel.art)) err(`${where}: travel art "${act.travel.art}" doesn't exist`);
+      if (act.stageExit && !artExists(act.stageExit.art)) err(`${where}: stage exit art "${act.stageExit.art}" doesn't exist`);
+      if (act.travel && !act.travel.label.trim()) err(`${where}: travel needs a label`);
       for (const id of act.mechanics) gate(reg.mechanics, id, 'mechanic', where);
       for (const id of act.startStatuses ?? []) gate(reg.statuses, id, 'status', where);
       for (const id of [...(act.intro ?? []), ...(act.outro ?? [])]) gate(reg.cutscenes, id, 'cutscene', where);

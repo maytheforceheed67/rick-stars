@@ -42,6 +42,24 @@ describe('content registry', () => {
     expect(reg.music.has('school')).toBe(true);
   });
 
+  it('has no generic exits: every act but the last leaves by ship, portal or departure', () => {
+    for (const ep of reg.episodes.values()) {
+      const acts = episodeActs(ep);
+      acts.slice(0, -1).forEach((act) => {
+        expect(act.travel, `${ep.id} ${act.id}`).toBeDefined();
+        expect(['ship', 'portal', 'departure']).toContain(act.travel!.by);
+      });
+    }
+    const broken = { ...pilot.acts[0], travel: undefined };
+    const saved = pilot.acts[0];
+    pilot.acts[0] = broken;
+    try {
+      expect(validateRegistry(reg).some((e) => e.includes('ActDef.travel'))).toBe(true);
+    } finally {
+      pilot.acts[0] = saved;
+    }
+  });
+
   it('keeps every cutscene between 2 and 6 panels', () => {
     for (const cs of reg.cutscenes.values()) {
       expect(cs.panels.length, cs.id).toBeGreaterThanOrEqual(2);

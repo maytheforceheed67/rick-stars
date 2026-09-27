@@ -773,9 +773,14 @@ export type SceneStep =
   /** A ray-gun beam from the character to a spot (the freeze ray). */
   | { kind: 'beam'; who: ContentId; to: SceneSpot; color: number; sfx?: string }
   | { kind: 'wait'; seconds: number }
+  /** The act's story weapon changes hands (ActDef.weapon): its giver says the line, Morty catches it. */
+  | { kind: 'weapon' }
+  /** Swaps a character's sprite (Rick passing out, Snuffles in his helmet); null puts theirs back. */
+  | { kind: 'pose'; who: ContentId; art: string | null }
   /** Runs code at this point (swap a sprite, drop a prop, set a flag). Also runs when skipped. */
   | { kind: 'do'; fn: () => void }
-  | { kind: 'leave'; who: ContentId; via: 'door' | 'portal' };
+  /** Walks out through the nearest door, steps into a portal, or fades away where they stand. */
+  | { kind: 'leave'; who: ContentId; via: 'door' | 'portal' | 'here' };
 
 /** Script attached to a special room, encounter or fixed room. */
 export interface RoomScript {
@@ -954,6 +959,8 @@ export interface FixedRoomDef {
   kind: RoomKind;
   template: ContentId;
   script?: ContentId;
+  /** This room looks like somewhere else than the rest of the act (the inside of Rick's ship). */
+  biome?: BiomeDef;
 }
 
 export interface FixedLayout {
@@ -1045,7 +1052,13 @@ export interface ActDef {
   unarmed?: boolean;
   /** Statuses applied when the act starts. */
   startStatuses?: ContentId[];
+  /** Comic-panel cutscenes before the act: quick recaps, always skippable. */
   intro?: ContentId[];
+  /**
+   * An in-engine scene acted out in the first room right after Morty arrives (Rick walking out of
+   * the portal to explain the place). Big story beats are played like this, not as comics.
+   */
+  opening?(api: RoomScriptApi): SceneStep[];
   outro?: ContentId[];
   /**
    * How Morty leaves once the finale is done. Every act but an episode's last needs one: there

@@ -7,6 +7,7 @@
 import type { EnemyRef, MechanicDef, MechanicInstance, RoomInfo, Vec } from '../../../../engine/types';
 import { ECONOMY, PILOT } from '../../../balance';
 import { CUSTOMS_AGENTS } from '../enemies';
+import { coverBlown } from '../scenes';
 
 const CALM_AGENTS = ['gromflomite-clerk', 'gromflomite-guard'];
 
@@ -47,8 +48,9 @@ export const suspicion: MechanicDef = {
       api.flash(0xff3040, 200);
       api.shake(8, 300);
       api.hint(null);
-      api.playCutscene('pilot-cover-blown', () => {
+      api.here().actScene(coverBlown(), () => {
         api.flags.coverBlown = true;
+        // Skipping the scene still hands the gun over.
         api.giveActWeapon();
         const here = api.here();
         here.makeCombat();

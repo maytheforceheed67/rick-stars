@@ -136,7 +136,8 @@ export class HudScene extends Phaser.Scene implements HudApi {
     this.texts.objective.setText(m.objective ?? '');
     this.texts.timer.setText(m.timer ? `${m.timer.label} ${Math.ceil(m.timer.left)}` : '');
     this.texts.timer.setColor(m.timer && m.timer.left <= 5 ? '#ff6a5a' : '#ffffff');
-    this.texts.hint.setText(m.hint ?? '');
+    // Hints wait until an acted scene is over.
+    this.texts.hint.setText(m.scene ? '' : (m.hint ?? ''));
     this.texts.skip.setVisible(m.scene);
     this.drawMap(m);
     this.updateToasts(dt);

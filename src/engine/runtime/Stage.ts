@@ -20,13 +20,18 @@ export interface StageHost {
   /** A character's world sprite key, if it has one. */
   spriteKey(who: ContentId): string | null;
   say(who: ContentId, text: string, seconds: number): void;
-  /** Registers where a character's speech bubbles go (null removes it). */
-  setAnchor(who: ContentId, anchor: (() => Vec | null) | null): void;
+  /**
+   * Registers where a character's speech bubbles go. null releases `previous` (unless something
+   * else, like a prop of the same character, has taken the bubbles over since).
+   */
+  setAnchor(who: ContentId, anchor: (() => Vec | null) | null, previous?: () => Vec | null): void;
   /** Where someone walking in comes from: the door nearest `to`, or the room's edge. */
   doorNear(to: Vec): Vec;
   /** Keeps a spot inside the room's walls. */
   clamp(p: Vec): Vec;
   sfx(id: string): void;
+  /** Hands over the act's story weapon; returns how long its line takes to read (0 if nothing). */
+  giveWeapon(): number;
 }
 
 interface Actor {
@@ -194,10 +199,26 @@ export class Stage {
       case 'beam':
         this.beam(step.who, this.spot(step.to, step.who), step.color, step.sfx, done);
         return;
+      case 'weapon':
+        this.delay(this.host.giveWeapon(), done);
+        return;
+      case 'pose':
+        this.pose(step.who, step.art);
+        done();
+        return;
       case 'leave':
         this.leave(step.who, step.via, done);
         return;
     }
+  }
+
+  private pose(who: ContentId, art: string | null): void {
+    const a = this.actors.get(who);
+    const key = art ?? this.host.spriteKey(who);
+    if (!a || !key || !this.host.scene.textures.exists(key)) return;
+    a.img.setTexture(key);
+    const fh = a.img.frame.height;
+    a.img.setOrigin(0.5, (fh - TEXTURE_PAD - 12) / fh);
   }
 
   private delay(seconds: number, done: () => void): void {
@@ -377,9 +398,16 @@ export class Stage {
     );
   }
 
-  private leave(who: ContentId, via: 'door' | 'portal', done: () => void): void {
+  private leave(who: ContentId, via: 'door' | 'portal' | 'here', done: () => void): void {
     const a = this.actors.get(who);
     if (!a) return done();
+    if (via === 'here') {
+      this.tweenTo(a.img as unknown as Record<string, number>, { alpha: 0 }, 260, () => {
+        this.removeActor(who);
+        done();
+      });
+      return;
+    }
     if (via === 'door') {
       const door = this.host.doorNear({ x: a.img.x, y: a.img.y });
       this.walk(who, door, WALK_SPEED, () => {
@@ -426,6 +454,6 @@ export class Stage {
     a.img.destroy();
     a.shadow.destroy();
     this.actors.delete(who);
-    this.host.setAnchor(who, null);
+    this.host.setAnchor(who, null, a.anchor);
   }
 }
